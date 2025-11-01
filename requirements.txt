@@ -1,6 +1,6 @@
-python-telegram-bot==21.4
-Flask==3.0.3
 yfinance
 pandas
 numpy
 matplotlib
+python-telegram-bot==20.3
+flask
