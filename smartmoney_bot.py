@@ -18,17 +18,16 @@ URL = os.getenv("RAILWAY_URL", "https://smartmoney-bot.up.railway.app")
 app = Flask(__name__)
 
 FUTURES = {
-    'gc': 'GC=F',   # золото
-    'cl': 'CL=F',   # нефть
-    'pl': 'PL=F',   # платина
-    '6e': '6E=F',   # евро
-    '6j': '6J=F',   # иена
-    'dx': 'DX=F'    # долларовый индекс
+    'gc': 'GC=F',
+    'cl': 'CL=F',
+    'pl': 'PL=F',
+    '6e': '6E=F',
+    '6j': '6J=F',
+    'dx': 'DX=F'
 }
 
 # --- Обработчик активов ---
 async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет график выбранного фьючерса по команде (/gc, /cl, ...)"""
     try:
         cmd = update.message.text.lower().replace("/", "")
         if cmd not in FUTURES:
@@ -59,7 +58,7 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка: {e}")
         print("handle_asset error:", e)
 
-# --- Остальные команды ---
+# --- Другие команды ---
 async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📊 Distribution report (пока пусто).")
 
@@ -82,37 +81,47 @@ app_bot.add_handler(CommandHandler("start", start_cmd))
 # --- Flask маршруты ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Основной webhook для Telegram"""
     try:
         json_update = request.get_json(force=True)
         update = Update.de_json(json_update, app_bot.bot)
-        asyncio.run(app_bot.process_update(update))  # ✅ синхронно, без create_task
+        asyncio.run(app_bot.process_update(update))
         return "OK", 200
     except Exception as e:
         print("❌ Webhook error:", e)
         return f"Error: {e}", 500
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def index():
-    return "SmartMoney Bot is alive!", 200
+    return "✅ SmartMoney Bot is alive!", 200
 
-# --- Установка вебхука ---
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+# --- Установка webhook ---
 async def setup_webhook():
     webhook_url = f"{URL}/webhook"
     try:
         await app_bot.bot.delete_webhook()
         ok = await app_bot.bot.set_webhook(webhook_url)
-        print(f"✅ Webhook set to {webhook_url} (result: {ok})")
+        if ok:
+            print(f"✅ Webhook установлен: {webhook_url}")
+        else:
+            print("⚠️ Не удалось установить webhook")
     except Exception as e:
-        print("❌ Error setting webhook:", e)
+        print("❌ Ошибка при установке webhook:", e)
 
 # --- Запуск ---
 def run_flask():
+    print(f"🌐 Flask запущен на порту {PORT}")
     app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
+    # 1️⃣ Запускаем Flask в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(setup_webhook())
-    print("🚀 SmartMoney Bot started on Railway")
-    loop.run_forever()
+
+    # 2️⃣ Настраиваем webhook после запуска
+    asyncio.run(setup_webhook())
+
+    print("🚀 SmartMoney Bot готов к работе")
+    asyncio.get_event_loop().run_forever()
