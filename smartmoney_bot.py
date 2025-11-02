@@ -57,7 +57,7 @@ async def setup_webhook():
 # === Flask сервер ===
 def run_flask():
     print("🚀 Flask сервер запущен на порту 8080")
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 
 # === Основной запуск ===
