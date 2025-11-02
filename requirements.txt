@@ -1,5 +1,5 @@
-Flask
-gunicorn
+fastapi
+uvicorn[standard]
 python-telegram-bot==20.3
 yfinance
 pandas
