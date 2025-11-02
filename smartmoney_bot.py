@@ -1,126 +1,65 @@
-import io
-import os
-import yfinance as yf
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import threading
 import asyncio
+from aiogram import Bot, Dispatcher, types, Router
+from aiogram.filters import Command
+import threading
+import time
 
-# --- Настройки ---
-TOKEN = os.getenv("BOT_TOKEN", "ТВОЙ_ТОКЕН_СЮДА")
-PORT = int(os.getenv("PORT", 8080))
-URL = os.getenv("RAILWAY_URL", "https://smartmoney-bot.up.railway.app")
+# === Настройки ===
+TOKEN = "ТВОЙ_ТОКЕН_БОТА"  # 🔴 вставь сюда токен бота
+WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"
 
+# === Flask и aiogram ===
 app = Flask(__name__)
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+router = Router()
+dp.include_router(router)
 
-FUTURES = {
-    'gc': 'GC=F',
-    'cl': 'CL=F',
-    'pl': 'PL=F',
-    '6e': '6E=F',
-    '6j': '6J=F',
-    'dx': 'DX=F'
-}
+# === Команды бота ===
+@router.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await message.answer("👋 Привет! Я SmartMoney Bot. Готов к работе!")
 
-# --- Обработчик активов ---
-async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        cmd = update.message.text.lower().replace("/", "")
-        if cmd not in FUTURES:
-            await update.message.reply_text("Неизвестный актив. Используй: /gc, /cl, /pl, /6e, /6j, /dx")
-            return
+@router.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer("ℹ️ Команды:\n/start — начать\n/help — помощь")
 
-        ticker = FUTURES[cmd]
-        await update.message.reply_text(f"📈 Загружаю данные по {ticker}...")
+@router.message()
+async def echo_all(message: types.Message):
+    await message.answer(f"Ты написал: {message.text}")
 
-        data = yf.download(ticker, period="6mo", interval="1d")
-        if data.empty:
-            await update.message.reply_text("⚠️ Не удалось получить данные.")
-            return
-
-        plt.figure(figsize=(8, 4))
-        plt.plot(data["Close"], label=ticker)
-        plt.title(f"{ticker} — последние 6 месяцев")
-        plt.legend()
-        plt.grid(True)
-
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png")
-        buf.seek(0)
-        plt.close()
-
-        await update.message.reply_photo(photo=buf)
-    except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
-        print("handle_asset error:", e)
-
-# --- Остальные команды ---
-async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📊 Distribution report (пока пусто).")
-
-async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📦 Команда /all пока не реализована.")
-
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 SmartMoney Bot активен. Доступные команды: /gc, /cl, /pl, /6e, /6j, /dx")
-
-# --- Telegram приложение ---
-app_bot = ApplicationBuilder().token(TOKEN).build()
-
-for cmd in FUTURES.keys():
-    app_bot.add_handler(CommandHandler(cmd, handle_asset))
-
-app_bot.add_handler(CommandHandler("dist", distribution))
-app_bot.add_handler(CommandHandler("all", all_command))
-app_bot.add_handler(CommandHandler("start", start_cmd))
-
-# --- Flask маршруты ---
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        json_update = request.get_json(force=True)
-        update = Update.de_json(json_update, app_bot.bot)
-        asyncio.run(app_bot.process_update(update))
-        return "OK", 200
-    except Exception as e:
-        print("❌ Webhook error:", e)
-        return f"Error: {e}", 500
-
+# === Flask маршруты ===
 @app.route("/", methods=["GET"])
 def index():
-    return "✅ SmartMoney Bot is alive!", 200
+    return "✅ SmartMoney Bot Flask server is running"
 
-@app.route("/health", methods=["GET"])
-def health():
-    return "OK", 200
-
-# --- Установка вебхука ---
-async def setup_webhook():
-    webhook_url = f"{URL}/webhook"
+@app.post("/webhook")
+async def telegram_webhook():
     try:
-        await app_bot.bot.delete_webhook()
-        ok = await app_bot.bot.set_webhook(webhook_url)
-        if ok:
-            print(f"✅ Webhook установлен: {webhook_url}")
-        else:
-            print("⚠️ Не удалось установить webhook")
+        update = types.Update(**request.json)
+        await dp.feed_update(bot, update)
     except Exception as e:
-        print("❌ Ошибка при установке webhook:", e)
+        print("❌ Ошибка обработки апдейта:", e)
+    return "ok", 200
 
-# --- Запуск ---
+# === Установка webhook ===
+async def setup_webhook():
+    await bot.delete_webhook()
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+
+# === Flask сервер ===
 def run_flask():
-    print(f"🌐 Flask запущен на порту {PORT}")
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=8080)
 
+# === Основной запуск ===
 if __name__ == "__main__":
-    # 1️⃣ Flask запускается в отдельном потоке
+    # Flask запускается в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
+    time.sleep(5)
 
-    # 2️⃣ Создаём новый event loop (без run_forever)
+    # Устанавливаем webhook
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(setup_webhook())
