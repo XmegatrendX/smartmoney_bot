@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import asyncio
 import logging
+import uvicorn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -89,18 +90,19 @@ async def webhook(request: Request):
 async def root():
     return {"status": "SmartMoney Bot жив!"}
 
-# --- Установка webhook ---
-@app.on_event("startup")
-async def startup():
+# --- Установка webhook при запуске ---
+async def setup_webhook():
     try:
         await bot_app.bot.delete_webhook(drop_pending_updates=True)
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook установлен: {URL}/webhook")
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"Ошибка установки webhook: {e}")
 
 # --- Запуск ---
-import uvicorn
-
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    # Установка webhook
+    asyncio.run(setup_webhook())
+    
+    # Запуск сервера
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")
