@@ -7,8 +7,8 @@ import time
 import os
 
 # === Настройки ===
-TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZ1FVXy1s")  # токен
-WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"  # Railway URL
+TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZ1FVXy1s")
+WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"
 
 # === Flask и aiogram ===
 app = Flask(__name__)
@@ -32,27 +32,30 @@ async def echo_all(message: types.Message):
 
 # === Flask маршруты ===
 @app.route("/", methods=["GET"])
-def index():
+def home():
     return "✅ SmartMoney Bot Flask server is running"
 
 @app.route("/webhook", methods=["POST"])
-def telegram_webhook():
+def webhook():
     try:
-        json_data = request.get_json()
-        asyncio.run(handle_update(json_data))
+        update_data = request.get_json(force=True)
+        asyncio.run(process_update(update_data))
     except Exception as e:
         print("❌ Ошибка обработки апдейта:", e)
     return "ok", 200
 
-async def handle_update(json_data):
-    update = types.Update(**json_data)
+async def process_update(update_data):
+    update = types.Update(**update_data)
     await dp.feed_update(bot, update)
 
 # === Установка webhook ===
 async def setup_webhook():
     await bot.delete_webhook()
-    await bot.set_webhook(WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    success = await bot.set_webhook(WEBHOOK_URL)
+    if success:
+        print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    else:
+        print("⚠️ Ошибка установки вебхука!")
 
 # === Flask сервер ===
 def run_flask():
