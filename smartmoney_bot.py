@@ -52,12 +52,15 @@ def handle_asset(update: Update, context: CallbackContext):
         buf.seek(0)
         plt.close()
 
+        # Указываем filename и mime_type вручную
         update.message.reply_photo(
             photo=buf,
+            filename="chart.png",
             caption=f"{ticker} — до {data.index[-1].strftime('%d.%m.%Y')}"
         )
     except Exception as e:
         update.message.reply_text(f"Ошибка: {e}")
+        logger.error(f"Ошибка в handle_asset: {e}")
 
 def start(update: Update, context: CallbackContext):
     update.message.reply_text(
