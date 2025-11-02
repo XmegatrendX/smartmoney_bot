@@ -58,7 +58,7 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка: {e}")
         print("handle_asset error:", e)
 
-# --- Другие команды ---
+# --- Остальные команды ---
 async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📊 Distribution report (пока пусто).")
 
@@ -98,7 +98,7 @@ def index():
 def health():
     return "OK", 200
 
-# --- Установка webhook ---
+# --- Установка вебхука ---
 async def setup_webhook():
     webhook_url = f"{URL}/webhook"
     try:
@@ -117,11 +117,13 @@ def run_flask():
     app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
-    # 1️⃣ Запускаем Flask в отдельном потоке
+    # 1️⃣ Flask запускается в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # 2️⃣ Настраиваем webhook после запуска
-    asyncio.run(setup_webhook())
+    # 2️⃣ Создаём новый event loop (без run_forever)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(setup_webhook())
 
     print("🚀 SmartMoney Bot готов к работе")
-    asyncio.get_event_loop().run_forever()
+    loop.run_forever()
