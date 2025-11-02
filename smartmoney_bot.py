@@ -35,13 +35,14 @@ async def echo_all(message: types.Message):
 # === Flask маршруты ===
 @app.route("/", methods=["GET"])
 def index():
-    return "✅ SmartMoney Bot Flask server is running", 200
+    return "🚀 SmartMoney Bot Flask server is running. Webhook активен!", 200
+
 
 @app.route("/webhook", methods=["POST"])
-def telegram_webhook():
+async def telegram_webhook():
     try:
         update = types.Update(**request.json)
-        asyncio.run(dp.feed_update(bot, update))
+        await dp.feed_update(bot, update)
     except Exception as e:
         print("❌ Ошибка обработки апдейта:", e)
     return "ok", 200
@@ -62,12 +63,15 @@ def run_flask():
 
 # === Основной запуск ===
 if __name__ == "__main__":
+    # 1️⃣ Запускаем Flask в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
-    time.sleep(5)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # 2️⃣ Даём серверу стартануть
+    time.sleep(3)
+
+    # 3️⃣ Запускаем цикл aiogram
+    loop = asyncio.get_event_loop()
     loop.run_until_complete(setup_webhook())
 
-    print("🚀 SmartMoney Bot готов к работе")
+    print("✅ SmartMoney Bot полностью готов к работе.")
     loop.run_forever()
