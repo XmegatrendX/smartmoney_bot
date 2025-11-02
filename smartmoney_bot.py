@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from contextlib import asynccontextmanager
 import asyncio
 import logging
-import uvicorn
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,8 +15,6 @@ logger = logging.getLogger(__name__)
 # --- Настройки ---
 TOKEN = os.getenv("BOT_TOKEN")
 URL = "https://smartmoney-bot.up.railway.app"
-
-app = FastAPI()
 
 # --- Telegram Bot ---
 bot_app = ApplicationBuilder().token(TOKEN).build()
@@ -74,8 +72,7 @@ for cmd in FUTURES:
 bot_app.add_handler(CommandHandler("start", start))
 
 # --- Webhook ---
-@app.post("/webhook")
-async def webhook(request: Request):
+async def webhook_handler(request: Request):
     try:
         json_update = await request.json()
         update = Update.de_json(json_update, bot_app.bot)
@@ -86,22 +83,28 @@ async def webhook(request: Request):
         logger.error(f"Webhook error: {e}")
         return {"error": str(e)}, 500
 
-@app.get("/")
-async def root():
-    return {"status": "SmartMoney Bot жив!"}
-
-# --- Установка webhook при старте ---
-@app.on_event("startup")
-async def startup_event():
+# --- Lifespan ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     try:
         await bot_app.bot.delete_webhook(drop_pending_updates=True)
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook установлен: {URL}/webhook")
-        info = await bot_app.bot.get_webhook_info()
-        logger.info(f"Webhook info: pending={info.pending_update_count}")
     except Exception as e:
         logger.error(f"Ошибка webhook: {e}")
+    yield
+    # Shutdown (необязательно)
+    pass
+
+# --- FastAPI ---
+app = FastAPI(lifespan=lifespan)
+
+app.post("/webhook")(webhook_handler)
+app.get("/")(lambda: {"status": "SmartMoney Bot жив!"})
 
 # --- Запуск ---
+import uvicorn
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")
