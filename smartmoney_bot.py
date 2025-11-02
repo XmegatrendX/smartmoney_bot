@@ -4,9 +4,10 @@ from aiogram import Bot, Dispatcher, types, Router
 from aiogram.filters import Command
 import threading
 import time
+import os
 
 # === Настройки ===
-TOKEN = "ТВОЙ_ТОКЕН_БОТА"  # 🔴 вставь сюда токен бота
+TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZ1FVXy1s")  # <-- токен
 WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"
 
 # === Flask и aiogram ===
@@ -55,11 +56,9 @@ def run_flask():
 
 # === Основной запуск ===
 if __name__ == "__main__":
-    # Flask запускается в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
     time.sleep(5)
 
-    # Устанавливаем webhook
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(setup_webhook())
