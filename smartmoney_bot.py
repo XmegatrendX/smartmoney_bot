@@ -9,7 +9,7 @@ import time
 import os
 
 # === Настройки ===
-TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZ1FVXy1s")  # <-- токен
+TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZlFVXy1s")  # <-- токен
 WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"
 
 # === Flask и aiogram ===
