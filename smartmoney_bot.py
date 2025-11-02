@@ -1,15 +1,12 @@
 import io
 import os
 import yfinance as yf
-import pandas as pd
-import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from datetime import datetime
 import threading
 import asyncio
 
@@ -62,7 +59,7 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка: {e}")
         print("handle_asset error:", e)
 
-# --- Остальные команды (заглушки) ---
+# --- Остальные команды ---
 async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📊 Distribution report (пока пусто).")
 
@@ -85,19 +82,21 @@ app_bot.add_handler(CommandHandler("start", start_cmd))
 # --- Flask маршруты ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    """Основной webhook для Telegram"""
     try:
         json_update = request.get_json(force=True)
         update = Update.de_json(json_update, app_bot.bot)
-        asyncio.get_event_loop().create_task(app_bot.process_update(update))
+        asyncio.run(app_bot.process_update(update))  # ✅ синхронно, без create_task
+        return "OK", 200
     except Exception as e:
-        print("Webhook error:", e)
-    return "OK", 200
+        print("❌ Webhook error:", e)
+        return f"Error: {e}", 500
 
 @app.route("/")
 def index():
     return "SmartMoney Bot is alive!", 200
 
-# --- Запуск ---
+# --- Установка вебхука ---
 async def setup_webhook():
     webhook_url = f"{URL}/webhook"
     try:
@@ -107,14 +106,12 @@ async def setup_webhook():
     except Exception as e:
         print("❌ Error setting webhook:", e)
 
+# --- Запуск ---
 def run_flask():
     app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
-    # Flask в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
-
-    # Асинхронно запустить webhook и polling loop
     loop = asyncio.get_event_loop()
     loop.run_until_complete(setup_webhook())
     print("🚀 SmartMoney Bot started on Railway")
