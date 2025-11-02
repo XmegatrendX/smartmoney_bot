@@ -92,9 +92,11 @@ async def root():
 @app.on_event("startup")
 async def startup():
     try:
-        await bot_app.bot.delete_webhook()
+        await bot_app.bot.delete_webhook(drop_pending_updates=True)
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook установлен: {URL}/webhook")
+        info = await bot_app.bot.get_webhook_info()
+        logger.info(f"Webhook info: pending={info.pending_update_count}")
     except Exception as e:
         logger.error(f"Ошибка webhook: {e}")
 
