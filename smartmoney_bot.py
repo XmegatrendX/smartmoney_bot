@@ -90,19 +90,18 @@ async def webhook(request: Request):
 async def root():
     return {"status": "SmartMoney Bot жив!"}
 
-# --- Установка webhook при запуске ---
-async def setup_webhook():
+# --- Установка webhook при старте ---
+@app.on_event("startup")
+async def startup_event():
     try:
         await bot_app.bot.delete_webhook(drop_pending_updates=True)
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook установлен: {URL}/webhook")
+        info = await bot_app.bot.get_webhook_info()
+        logger.info(f"Webhook info: pending={info.pending_update_count}")
     except Exception as e:
-        logger.error(f"Ошибка установки webhook: {e}")
+        logger.error(f"Ошибка webhook: {e}")
 
 # --- Запуск ---
 if __name__ == "__main__":
-    # Установка webhook
-    asyncio.run(setup_webhook())
-    
-    # Запуск сервера
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), log_level="info")
