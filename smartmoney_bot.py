@@ -56,16 +56,22 @@ def run_flask():
     app.run(host="0.0.0.0", port=port)
 
 # === Основной запуск ===
-if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке
+
+def main():
+    """Основная функция запуска бота и Flask."""
+    # Запускаем Flask-сервер в отдельном потоке
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
-    # Основной event loop для aiogram
+    # Запускаем aiogram event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-
     loop.run_until_complete(setup_webhook())
-
     print("🚀 SmartMoney Bot готов к работе")
     loop.run_forever()
+
+# Railway будет импортировать app, а не выполнять main()
+# Поэтому запускаем main() только если файл выполняется напрямую
+if __name__ == "__main__":
+    main()
+
