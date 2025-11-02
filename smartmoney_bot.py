@@ -3,8 +3,8 @@ import os
 import yfinance as yf
 import matplotlib.pyplot as plt
 from fastapi import FastAPI, Request
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update, Bot
+from telegram.ext import Dispatcher, CommandHandler, CallbackContext
 import asyncio
 import logging
 
@@ -16,9 +16,8 @@ TOKEN = os.getenv("BOT_TOKEN")
 URL = "https://smartmoney-bot.up.railway.app"
 
 app = FastAPI()
-
-# --- Telegram Bot ---
-bot_app = ApplicationBuilder().token(TOKEN).build()
+bot = Bot(TOKEN)
+dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
 FUTURES = {
     'gc': 'GC=F', 'cl': 'CL=F', 'pl': 'PL=F',
@@ -26,19 +25,19 @@ FUTURES = {
 }
 
 # --- Команды ---
-async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_asset(update: Update, context: CallbackContext):
     cmd = update.message.text.lower().lstrip("/")
     if cmd not in FUTURES:
-        await update.message.reply_text("Используй: /gc, /cl, /pl, /6e, /6j, /dx")
+        update.message.reply_text("Используй: /gc, /cl, /pl, /6e, /6j, /dx")
         return
 
     ticker = FUTURES[cmd]
-    await update.message.reply_text(f"Загружаю {ticker}...")
+    update.message.reply_text(f"Загружаю {ticker}...")
 
     try:
         data = yf.download(ticker, period="6mo", progress=False)
         if data.empty:
-            await update.message.reply_text("Нет данных.")
+            update.message.reply_text("Нет данных.")
             return
 
         plt.figure(figsize=(10, 6))
@@ -53,32 +52,32 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buf.seek(0)
         plt.close()
 
-        await update.message.reply_photo(
+        update.message.reply_photo(
             photo=buf,
             caption=f"{ticker} — до {data.index[-1].strftime('%d.%m.%Y')}"
         )
     except Exception as e:
-        await update.message.reply_text(f"Ошибка: {e}")
+        update.message.reply_text(f"Ошибка: {e}")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text(
         "SmartMoney Bot готов!\n"
         "Команды: /gc, /cl, /pl, /6e, /6j, /dx"
     )
 
 # Добавляем команды
+dispatcher.add_handler(CommandHandler("start", start))
 for cmd in FUTURES:
-    bot_app.add_handler(CommandHandler(cmd, handle_asset))
-bot_app.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler(cmd, handle_asset))
 
 # --- Webhook ---
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
         json_update = await request.json()
-        update = Update.de_json(json_update, bot_app.bot)
+        update = Update.de_json(json_update, bot)
         if update:
-            await bot_app.process_update(update)
+            dispatcher.process_update(update)
         return {"ok": True}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -92,11 +91,9 @@ async def root():
 @app.on_event("startup")
 async def startup():
     try:
-        await bot_app.bot.delete_webhook(drop_pending_updates=True)
-        await bot_app.bot.set_webhook(f"{URL}/webhook")
+        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook установлен: {URL}/webhook")
-        info = await bot_app.bot.get_webhook_info()
-        logger.info(f"Webhook info: pending={info.pending_update_count}")
     except Exception as e:
         logger.error(f"Ошибка webhook: {e}")
 
