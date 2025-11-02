@@ -7,8 +7,8 @@ import time
 import os
 
 # === Настройки ===
-TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZ1FVXy1s")  # <-- токен
-WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"
+TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZ1FVXy1s")  # <-- сюда можно вставить свой токен
+WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"  # <-- адрес Railway
 
 # === Flask и aiogram ===
 app = Flask(__name__)
@@ -35,10 +35,11 @@ async def echo_all(message: types.Message):
 def index():
     return "✅ SmartMoney Bot Flask server is running"
 
-@app.post("/webhook")
+@app.route("/webhook", methods=["POST"])
 async def telegram_webhook():
     try:
         update = types.Update(**request.json)
+        print("📩 Получен апдейт:", request.json)  # лог в консоль для проверки
         await dp.feed_update(bot, update)
     except Exception as e:
         print("❌ Ошибка обработки апдейта:", e)
@@ -56,9 +57,11 @@ def run_flask():
 
 # === Основной запуск ===
 if __name__ == "__main__":
+    # Flask запускается в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
     time.sleep(5)
 
+    # Устанавливаем webhook
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(setup_webhook())
