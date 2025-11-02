@@ -1,1 +1,1 @@
-web: gunicorn smartmoney_bot:app
+web: python smartmoney_bot.py
