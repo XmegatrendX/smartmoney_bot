@@ -3,7 +3,6 @@ import asyncio
 from aiogram import Bot, Dispatcher, types, Router
 from aiogram.filters import Command
 import threading
-import time
 import os
 
 # === Настройки ===
@@ -16,7 +15,6 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
-
 
 # === Команды бота ===
 @router.message(Command("start"))
@@ -31,22 +29,19 @@ async def cmd_help(message: types.Message):
 async def echo_all(message: types.Message):
     await message.answer(f"Ты написал: {message.text}")
 
-
 # === Flask маршруты ===
 @app.route("/", methods=["GET"])
 def index():
-    return "🚀 SmartMoney Bot Flask server is running. Webhook активен!", 200
-
+    return "✅ SmartMoney Bot Flask server is running", 200
 
 @app.route("/webhook", methods=["POST"])
-async def telegram_webhook():
+def telegram_webhook():
     try:
         update = types.Update(**request.json)
-        await dp.feed_update(bot, update)
+        asyncio.run(dp.feed_update(bot, update))
     except Exception as e:
         print("❌ Ошибка обработки апдейта:", e)
     return "ok", 200
-
 
 # === Установка webhook ===
 async def setup_webhook():
@@ -54,24 +49,17 @@ async def setup_webhook():
     await bot.set_webhook(WEBHOOK_URL)
     print(f"✅ Webhook установлен: {WEBHOOK_URL}")
 
-
 # === Flask сервер ===
 def run_flask():
-    print("🚀 Flask сервер запущен на порту 8080")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
+    port = int(os.environ.get("PORT", 5000))  # Railway передаёт порт сюда
+    print(f"🚀 Flask сервер запущен на порту {port}")
+    app.run(host="0.0.0.0", port=port)
 
 # === Основной запуск ===
 if __name__ == "__main__":
-    # 1️⃣ Запускаем Flask в отдельном потоке
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # 2️⃣ Даём серверу стартануть
-    time.sleep(3)
+    asyncio.run(setup_webhook())
 
-    # 3️⃣ Запускаем цикл aiogram
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(setup_webhook())
-
-    print("✅ SmartMoney Bot полностью готов к работе.")
-    loop.run_forever()
+    print("🚀 SmartMoney Bot готов к работе")
+    asyncio.get_event_loop().run_forever()
