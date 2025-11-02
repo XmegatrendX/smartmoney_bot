@@ -68,8 +68,6 @@ def main():
     loop.run_forever()
 
 # Если Railway импортирует через gunicorn smartmoney_bot:app,
-# то Flask будет запущен Gunicorn'ом, а main() стартует фоном в отдельном потоке.
+# Flask будет запущен Gunicorn'ом, а main() стартует фоном в отдельном потоке.
 flask_thread = threading.Thread(target=main, daemon=True)
 flask_thread.start()
-
-
