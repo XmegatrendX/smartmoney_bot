@@ -4,27 +4,27 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # use non-interactive backend for servers
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from flask import Flask, request
+from fastapi import FastAPI, Request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from datetime import datetime
+from contextlib import asynccontextmanager
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- Настройки ---
-TOKEN = os.getenv("BOT_TOKEN", "ТВОЙ_ТОКЕН_СЮДА")
-PORT = int(os.getenv("PORT", 8080))
-URL = os.getenv("RAILWAY_URL", "https://smartmoney-bot.up.railway.app")
+TOKEN = os.getenv("BOT_TOKEN")
+URL = os.getenv("RAILWAY_STATIC_URL") or "https://smartmoney-bot.up.railway.app"
 
-app = Flask(__name__)
+# --- Telegram Bot ---
+bot_app = ApplicationBuilder().token(TOKEN).build()
 
 FUTURES = {
-    'gc': 'GC=F',
-    'cl': 'CL=F',
-    'pl': 'PL=F',
-    '6e': '6E=F',
-    '6j': '6J=F',
-    'dx': 'DX=F'
+    'gc': 'GC=F', 'cl': 'CL=F', 'pl': 'PL=F',
+    '6e': '6E=F', '6j': '6J=F', 'dx': 'DX=F'
 }
 
 # --- Аналитика ---
@@ -32,7 +32,6 @@ def smart_money_flow(symbol, days=175):
     df = yf.download(symbol, period=f"{days}d", interval="1d", progress=False, auto_adjust=True)
     if df is None or len(df) < 20:
         return None
-    # in case of multiindex columns from yfinance
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
     df['Vol_Z'] = (df['Volume'] - df['Volume'].rolling(20).mean()) / (df['Volume'].rolling(20).std() + 1e-8)
@@ -58,7 +57,6 @@ def make_chart(df, symbol):
     ax.set_ylim(0, 100)
     ax.legend()
     ax.grid(alpha=0.3)
-    # annotate last value
     try:
         last_flow = float(df['Flow'].iloc[-1])
         last_date = df.index[-1]
@@ -66,7 +64,6 @@ def make_chart(df, symbol):
                 ha='left', va='center', bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
     except Exception:
         pass
-
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     buf.seek(0)
@@ -80,67 +77,36 @@ def make_distribution_chart():
         df = smart_money_flow(FUTURES[a])
         if df is not None:
             flow_data[a] = df['Flow']
-
     if not flow_data:
         return None
 
-    # Keep previous visual layout: grouped bars per asset
     fig = plt.figure(figsize=(19, 9))
     gs = fig.add_gridspec(1, 2, wspace=0.35)
 
-    # 1) Current sentiment bar (last value)
+    # Current sentiment
     ax1 = fig.add_subplot(gs[0, 0])
     assets_list = list(flow_data.keys())
-    scores = []
-    for k in assets_list:
-        try:
-            scores.append(float(flow_data[k].iloc[-1]) / 100.0)
-        except Exception:
-            scores.append(0.0)
-
-    bar_colors = []
-    for s in scores:
-        if s > 0.7:
-            bar_colors.append('#006400')
-        elif s > 0.55:
-            bar_colors.append('#32CD32')
-        elif s > 0.45:
-            bar_colors.append('gray')
-        elif s > 0.30:
-            bar_colors.append('#FF8C00')
-        else:
-            bar_colors.append('#DC143C')
-
+    scores = [float(flow_data[k].iloc[-1]) / 100.0 if len(flow_data[k]) > 0 else 0.0 for k in assets_list]
+    bar_colors = ['#006400' if s > 0.7 else '#32CD32' if s > 0.55 else 'gray' if s > 0.45 else '#FF8C00' if s > 0.30 else '#DC143C' for s in scores]
     bars = ax1.bar([a.upper() for a in assets_list], scores, color=bar_colors, edgecolor='black', linewidth=1.0)
     ax1.set_ylim(0, 1)
     ax1.set_ylabel('Sentiment (0-1)')
     ax1.set_title('Current Sentiment (CFTC, last trading day)', fontsize=12, fontweight='bold')
     ax1.grid(axis='y', alpha=0.3)
-    ax1.tick_params(axis='x', rotation=15)
-
     for bar, score in zip(bars, scores):
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
                  f'{score*100:.1f}%', ha='center', va='bottom', fontweight='bold', fontsize=9)
 
-    # 2) Distribution over 175 trading days (stacked-like grouped)
+    # Distribution
     ax2 = fig.add_subplot(gs[0, 1])
     colors = ['#006400', '#32CD32', 'gray', '#FF8C00', '#DC143C']
     level_ranges = [(70, 100), (55, 70), (45, 55), (30, 45), (0, 30)]
     level_names = ['Strong Bulls', 'Bulls', 'Neutral', 'Bears', 'Strong Bears']
-
     x = np.arange(len(assets_list))
     width = 0.15
     bottom = np.zeros(len(assets_list))
-
-    # compute counts
-    distribution_td = {asset: [0]*5 for asset in assets_list}
     for i, (low, high) in enumerate(level_ranges):
-        values = []
-        for asset in assets_list:
-            series = flow_data[asset]
-            cnt = int(((series > low) & (series <= high)).sum())
-            values.append(cnt)
-            distribution_td[asset][i] = cnt
+        values = [((flow_data[asset] > low) & (flow_data[asset] <= high)).sum() for asset in assets_list]
         ax2.bar(x + i*width, values, width, bottom=bottom, color=colors[i], edgecolor='black')
         for j, td_count in enumerate(values):
             if td_count > 0:
@@ -154,8 +120,6 @@ def make_distribution_chart():
     ax2.set_title('Distribution over 175 trading days', fontsize=12, fontweight='bold')
     ax2.set_ylim(0, 175)
     ax2.grid(axis='y', alpha=0.3)
-    ax2.tick_params(axis='x', rotation=15)
-
     legend_elements = [plt.Line2D([0], [0], marker='s', color='w', markerfacecolor=colors[i], markersize=10, label=level_names[i])
                        for i in range(len(level_names))]
     ax2.legend(handles=legend_elements, fontsize=8, loc='center left', bbox_to_anchor=(1.02, 0.5))
@@ -163,14 +127,13 @@ def make_distribution_chart():
     plt.suptitle('Sentiment: ' + ', '.join([a.upper() for a in assets_list]) + ' (CFTC, 175 Trading Days)\nby Megatrend',
                  fontsize=14, fontweight='bold', y=0.995)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     buf.seek(0)
     plt.close(fig)
     return buf
 
-# --- Telegram команды ---
+# --- Команды ---
 async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asset = update.message.text.replace('/', '').lower()
     if asset not in FUTURES:
@@ -182,26 +145,13 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Not enough data.")
         return
     rsx = calculate_rsx(df['Close'])
-    try:
-        last_flow = float(df['Flow'].iloc[-1])
-    except Exception:
-        last_flow = None
-    try:
-        last_rsx = float(rsx.iloc[-1])
-    except Exception:
-        last_rsx = None
-
+    last_flow = float(df['Flow'].iloc[-1]) if len(df) > 0 else None
+    last_rsx = float(rsx.iloc[-1]) if len(rsx) > 0 else None
     buf = make_chart(df, asset.upper())
     await update.message.reply_photo(photo=buf)
     txt = f"{asset.upper()}:\n"
-    if last_flow is not None:
-        txt += f"Smart Money Flow: {last_flow:.1f}%\n"
-    else:
-        txt += "Smart Money Flow: n/a\n"
-    if last_rsx is not None:
-        txt += f"RSX(9): {last_rsx:.1f}\n"
-    else:
-        txt += "RSX(9): n/a\n"
+    txt += f"Smart Money Flow: {last_flow:.1f}%\n" if last_flow else "Smart Money Flow: n/a\n"
+    txt += f"RSX(9): {last_rsx:.1f}\n" if last_rsx else "RSX(9): n/a\n"
     txt += f"Date: {df.index[-1].strftime('%d.%m.%Y')}"
     await update.message.reply_text(txt)
 
@@ -211,22 +161,18 @@ async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if buf:
         await update.message.reply_photo(photo=buf, caption="Smart Money Flow Distribution (175 Trading Days)")
     else:
-        await update.message.reply_text("Could not generate distribution chart.")
+        await update.message.reply_text("Could not generate chart.")
 
 async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Build and send all charts sequentially, then distribution."""
-    await update.message.reply_text("Generating all charts (this may take a while)...")
+    await update.message.reply_text("Generating all charts...")
     for cmd in FUTURES.keys():
         df = smart_money_flow(FUTURES[cmd])
-        if df is None:
-            await update.message.reply_text(f"{cmd.upper()}: not enough data.")
-            continue
+        if df is None: continue
         buf = make_chart(df, cmd.upper())
         await update.message.reply_photo(photo=buf, caption=f"{cmd.upper()} — Smart Money Flow")
-    # distribution
     bufd = make_distribution_chart()
     if bufd:
-        await update.message.reply_photo(photo=bufd, caption="Smart Money Flow Distribution (175 Trading Days)")
+        await update.message.reply_photo(photo=bufd, caption="Distribution")
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = "Smart Money Flow by Megatrend — commands:\n"
@@ -235,41 +181,42 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt += "/all — all charts + distribution\n"
     await update.message.reply_text(txt)
 
-# --- Создание Telegram приложения ---
-if TOKEN == "ТВОЙ_ТОКЕН_СЮДА" or not TOKEN:
-    print("WARNING: BOT_TOKEN is not set or left placeholder. Set BOT_TOKEN in Railway variables before deploy.")
-
-app_bot = ApplicationBuilder().token(TOKEN).build()
+# Добавляем команды
 for cmd in FUTURES.keys():
-    app_bot.add_handler(CommandHandler(cmd, handle_asset))
-app_bot.add_handler(CommandHandler("dist", distribution))
-app_bot.add_handler(CommandHandler("all", all_command))
-app_bot.add_handler(CommandHandler("start", start_cmd))
+    bot_app.add_handler(CommandHandler(cmd, handle_asset))
+bot_app.add_handler(CommandHandler("dist", distribution))
+bot_app.add_handler(CommandHandler("all", all_command))
+bot_app.add_handler(CommandHandler("start", start_cmd))
 
-# --- Вебхуки ---
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    # receive update from Telegram and put into Application queue
-    update = Update.de_json(request.get_json(force=True), app_bot.bot)
-    app_bot.update_queue.put_nowait(update)
-    return "OK", 200
+# --- Webhook ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await bot_app.bot.set_webhook(f"{URL}/webhook")
+        logger.info(f"Webhook set: {URL}/webhook")
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+    yield
 
-@app.route("/")
-def index():
-    return "SmartMoney Bot is alive!", 200
+app = FastAPI(lifespan=lifespan)
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    try:
+        json_update = await request.json()
+        update = Update.de_json(json_update, bot_app.bot)
+        if update:
+            await bot_app.process_update(update)
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return {"error": str(e)}, 500
+
+@app.get("/")
+async def root():
+    return {"status": "SmartMoney Bot alive!"}
 
 # --- Запуск ---
+import uvicorn
 if __name__ == "__main__":
-    import asyncio
-    async def run():
-        # Устанавливаем webhook на правильный endpoint
-        webhook_url = f"{URL}/webhook"
-        try:
-            ok = await app_bot.bot.set_webhook(webhook_url)
-            print(f"set_webhook result: {ok} -> {webhook_url}")
-        except Exception as e:
-            print("Error setting webhook:", e)
-        # Run flask (blocking). Railway will route HTTPS -> this flask server.
-        app.run(host="0.0.0.0", port=PORT)
-
-    asyncio.run(run())
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
