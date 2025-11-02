@@ -51,15 +51,21 @@ async def setup_webhook():
 
 # === Flask сервер ===
 def run_flask():
-    port = int(os.environ.get("PORT", 5000))  # Railway передаёт порт сюда
+    port = int(os.environ.get("PORT", 5000))
     print(f"🚀 Flask сервер запущен на порту {port}")
     app.run(host="0.0.0.0", port=port)
 
 # === Основной запуск ===
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
+    # Запускаем Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
 
-    asyncio.run(setup_webhook())
+    # Основной event loop для aiogram
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(setup_webhook())
 
     print("🚀 SmartMoney Bot готов к работе")
-    asyncio.get_event_loop().run_forever()
+    loop.run_forever()
