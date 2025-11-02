@@ -1,5 +1,3 @@
-# === smartmoney_bot.py ===
-
 from flask import Flask, request
 import asyncio
 from aiogram import Bot, Dispatcher, types, Router
@@ -9,7 +7,7 @@ import time
 import os
 
 # === Настройки ===
-TOKEN = os.getenv("BOT_TOKEN", "8104666804:AAEQoDrYxo6k7gTQknPbyAqYfCnZlFVXy1s")  # <-- токен
+TOKEN = os.getenv("BOT_TOKEN", "<твой_токен>")
 WEBHOOK_URL = "https://smartmoney-bot.up.railway.app/webhook"
 
 # === Flask и aiogram ===
@@ -38,23 +36,13 @@ def index():
     return "✅ SmartMoney Bot Flask server is running"
 
 @app.route("/webhook", methods=["POST"])
-def webhook():
-    # Flask — синхронный, поэтому запускаем асинхронно в event loop
-    data = request.get_json()
-    if not data:
-        return "no data", 400
+async def telegram_webhook():
     try:
-        asyncio.run(handle_update(data))
+        update = types.Update(**request.json)
+        await dp.feed_update(bot, update)
     except Exception as e:
         print("❌ Ошибка обработки апдейта:", e)
-        return "error", 500
     return "ok", 200
-
-
-async def handle_update(data):
-    update = types.Update(**data)
-    await dp.feed_update(bot, update)
-
 
 # === Установка webhook ===
 async def setup_webhook():
@@ -64,16 +52,17 @@ async def setup_webhook():
 
 # === Flask сервер ===
 def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))  # <-- ключевой момент
+    app.run(host="0.0.0.0", port=port)
 
 # === Основной запуск ===
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     time.sleep(5)
 
-    asyncio.run(setup_webhook())
-    print("🚀 SmartMoney Bot готов к работе")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(setup_webhook())
 
-    # Запуск бесконечного цикла событий
-    while True:
-        time.sleep(60)
+    print("🚀 SmartMoney Bot готов к работе")
+    loop.run_forever()
