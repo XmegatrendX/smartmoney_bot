@@ -217,6 +217,7 @@ async def root():
     return {"status": "SmartMoney Bot alive!"}
 
 # --- Запуск ---
-import uvicorn
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    import uvicorn
+    uvicorn.run("smartmoney_bot:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
