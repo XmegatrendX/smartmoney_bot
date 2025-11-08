@@ -150,6 +150,7 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt += f"Date: {df.index[-1].strftime('%d.%m.%Y')}"
         await update.message.reply_text(txt)
     except Exception as e:
+        logger.error(f"Error in handle_asset: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,6 +162,7 @@ async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Could not generate chart.")
     except Exception as e:
+        logger.error(f"Error in distribution: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -175,6 +177,7 @@ async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if bufd:
             await update.message.reply_photo(photo=bufd, caption="Distribution")
     except Exception as e:
+        logger.error(f"Error in all_command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -185,6 +188,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt += "/all — all charts + distribution\n"
         await update.message.reply_text(txt)
     except Exception as e:
+        logger.error(f"Error in start_cmd: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
 
 # Добавляем команды
@@ -203,7 +207,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"Webhook set: {URL}/webhook")
     except Exception as e:
         logger.error(f"Webhook error: {e}")
+    await bot_app.start()  # Запуск внутренних задач для обработки очереди
     yield
+    await bot_app.stop()  # Остановка при shutdown
 
 app = FastAPI(lifespan=lifespan)
 
@@ -213,7 +219,7 @@ async def webhook(request: Request):
         json_update = await request.json()
         update = Update.de_json(json_update, bot_app.bot)
         if update:
-            await bot_app.update_queue.put(update)  # Помещаем в очередь для асинхронной обработки
+            await bot_app.process_update(update)  # Прямая обработка обновления
         return {"ok": True}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -226,4 +232,4 @@ async def root():
 # --- Запуск ---
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("smartmoney_bot:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
