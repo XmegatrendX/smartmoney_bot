@@ -11,17 +11,16 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from contextlib import asynccontextmanager
 import logging
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Настройки ---
 TOKEN = os.getenv("BOT_TOKEN")
-URL = os.getenv("RAILWAY_STATIC_URL") or "https://smartmoney-bot.up.railway.app"
+RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
+URL = "https://" + RAILWAY_STATIC_URL if RAILWAY_STATIC_URL else "https://smartmoney-bot.up.railway.app"  # fallback
 
 # --- Telegram Bot ---
 bot_app = ApplicationBuilder().token(TOKEN).build()
-
 FUTURES = {
     'gc': 'GC=F', 'cl': 'CL=F', 'pl': 'PL=F',
     '6e': '6E=F', '6j': '6J=F', 'dx': 'DX=F'
@@ -79,10 +78,8 @@ def make_distribution_chart():
             flow_data[a] = df['Flow']
     if not flow_data:
         return None
-
     fig = plt.figure(figsize=(19, 9))
     gs = fig.add_gridspec(1, 2, wspace=0.35)
-
     # Current sentiment
     ax1 = fig.add_subplot(gs[0, 0])
     assets_list = list(flow_data.keys())
@@ -96,7 +93,6 @@ def make_distribution_chart():
     for bar, score in zip(bars, scores):
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
                  f'{score*100:.1f}%', ha='center', va='bottom', fontweight='bold', fontsize=9)
-
     # Distribution
     ax2 = fig.add_subplot(gs[0, 1])
     colors = ['#006400', '#32CD32', 'gray', '#FF8C00', '#DC143C']
@@ -113,7 +109,6 @@ def make_distribution_chart():
                 ax2.text(x[j] + i*width, bottom[j] + td_count/2, f'{td_count} d.', ha='center', va='center',
                          fontsize=8, color='black', fontweight='bold')
         bottom += np.array(values)
-
     ax2.set_xticks(x + width * 2)
     ax2.set_xticklabels([a.upper() for a in assets_list], fontsize=11)
     ax2.set_ylabel('Number of trading days')
@@ -123,7 +118,6 @@ def make_distribution_chart():
     legend_elements = [plt.Line2D([0], [0], marker='s', color='w', markerfacecolor=colors[i], markersize=10, label=level_names[i])
                        for i in range(len(level_names))]
     ax2.legend(handles=legend_elements, fontsize=8, loc='center left', bbox_to_anchor=(1.02, 0.5))
-
     plt.suptitle('Sentiment: ' + ', '.join([a.upper() for a in assets_list]) + ' (CFTC, 175 Trading Days)\nby Megatrend',
                  fontsize=14, fontweight='bold', y=0.995)
     plt.tight_layout(rect=[0, 0, 1, 0.96])
@@ -135,51 +129,63 @@ def make_distribution_chart():
 
 # --- Команды ---
 async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    asset = update.message.text.replace('/', '').lower()
-    if asset not in FUTURES:
-        await update.message.reply_text("Unknown command.")
-        return
-    await update.message.reply_text(f"Fetching {asset.upper()} data...")
-    df = smart_money_flow(FUTURES[asset])
-    if df is None:
-        await update.message.reply_text("Not enough data.")
-        return
-    rsx = calculate_rsx(df['Close'])
-    last_flow = float(df['Flow'].iloc[-1]) if len(df) > 0 else None
-    last_rsx = float(rsx.iloc[-1]) if len(rsx) > 0 else None
-    buf = make_chart(df, asset.upper())
-    await update.message.reply_photo(photo=buf)
-    txt = f"{asset.upper()}:\n"
-    txt += f"Smart Money Flow: {last_flow:.1f}%\n" if last_flow else "Smart Money Flow: n/a\n"
-    txt += f"RSX(9): {last_rsx:.1f}\n" if last_rsx else "RSX(9): n/a\n"
-    txt += f"Date: {df.index[-1].strftime('%d.%m.%Y')}"
-    await update.message.reply_text(txt)
+    try:
+        asset = update.message.text.replace('/', '').lower()
+        if asset not in FUTURES:
+            await update.message.reply_text("Unknown command.")
+            return
+        await update.message.reply_text(f"Fetching {asset.upper()} data...")
+        df = smart_money_flow(FUTURES[asset])
+        if df is None:
+            await update.message.reply_text("Not enough data.")
+            return
+        rsx = calculate_rsx(df['Close'])
+        last_flow = float(df['Flow'].iloc[-1]) if len(df) > 0 else None
+        last_rsx = float(rsx.iloc[-1]) if len(rsx) > 0 else None
+        buf = make_chart(df, asset.upper())
+        await update.message.reply_photo(photo=buf)
+        txt = f"{asset.upper()}:\n"
+        txt += f"Smart Money Flow: {last_flow:.1f}%\n" if last_flow else "Smart Money Flow: n/a\n"
+        txt += f"RSX(9): {last_rsx:.1f}\n" if last_rsx else "RSX(9): n/a\n"
+        txt += f"Date: {df.index[-1].strftime('%d.%m.%Y')}"
+        await update.message.reply_text(txt)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
 
 async def distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Generating distribution chart...")
-    buf = make_distribution_chart()
-    if buf:
-        await update.message.reply_photo(photo=buf, caption="Smart Money Flow Distribution (175 Trading Days)")
-    else:
-        await update.message.reply_text("Could not generate chart.")
+    try:
+        await update.message.reply_text("Generating distribution chart...")
+        buf = make_distribution_chart()
+        if buf:
+            await update.message.reply_photo(photo=buf, caption="Smart Money Flow Distribution (175 Trading Days)")
+        else:
+            await update.message.reply_text("Could not generate chart.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
 
 async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Generating all charts...")
-    for cmd in FUTURES.keys():
-        df = smart_money_flow(FUTURES[cmd])
-        if df is None: continue
-        buf = make_chart(df, cmd.upper())
-        await update.message.reply_photo(photo=buf, caption=f"{cmd.upper()} — Smart Money Flow")
-    bufd = make_distribution_chart()
-    if bufd:
-        await update.message.reply_photo(photo=bufd, caption="Distribution")
+    try:
+        await update.message.reply_text("Generating all charts...")
+        for cmd in FUTURES.keys():
+            df = smart_money_flow(FUTURES[cmd])
+            if df is None: continue
+            buf = make_chart(df, cmd.upper())
+            await update.message.reply_photo(photo=buf, caption=f"{cmd.upper()} — Smart Money Flow")
+        bufd = make_distribution_chart()
+        if bufd:
+            await update.message.reply_photo(photo=bufd, caption="Distribution")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = "Smart Money Flow by Megatrend — commands:\n"
-    txt += "/gc /cl /pl /6e /6j /dx — charts\n"
-    txt += "/dist — distribution\n"
-    txt += "/all — all charts + distribution\n"
-    await update.message.reply_text(txt)
+    try:
+        txt = "Smart Money Flow by Megatrend — commands:\n"
+        txt += "/gc /cl /pl /6e /6j /dx — charts\n"
+        txt += "/dist — distribution\n"
+        txt += "/all — all charts + distribution\n"
+        await update.message.reply_text(txt)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
 
 # Добавляем команды
 for cmd in FUTURES.keys():
@@ -191,6 +197,7 @@ bot_app.add_handler(CommandHandler("start", start_cmd))
 # --- Webhook ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await bot_app.initialize()  # Инициализация приложения
     try:
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook set: {URL}/webhook")
@@ -206,7 +213,7 @@ async def webhook(request: Request):
         json_update = await request.json()
         update = Update.de_json(json_update, bot_app.bot)
         if update:
-            await bot_app.process_update(update)
+            await bot_app.update_queue.put(update)  # Помещаем в очередь для асинхронной обработки
         return {"ok": True}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -217,7 +224,6 @@ async def root():
     return {"status": "SmartMoney Bot alive!"}
 
 # --- Запуск ---
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("smartmoney_bot:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
