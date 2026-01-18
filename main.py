@@ -7,20 +7,26 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from contextlib import asynccontextmanager
 import logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Настройки ---
 TOKEN = os.getenv("BOT_TOKEN")
-RAILWAY_STATIC_URL = os.getenv("RAILWAY_STATIC_URL")
-URL = "https://" + RAILWAY_STATIC_URL if RAILWAY_STATIC_URL else "https://smartmoney-bot.up.railway.app"  # fallback
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is not set!")
+
+# Укажи здесь URL Render (твой веб-сервис)
+URL = "https://smartmoney-bot-ilqm.onrender.com"
 
 # --- Telegram Bot ---
 bot_app = ApplicationBuilder().token(TOKEN).build()
+
 FUTURES = {
     'gc': 'GC=F', 'cl': 'CL=F', 'pl': 'PL=F',
     '6e': '6E=F', '6j': '6J=F', 'dx': 'DX=F'
@@ -201,15 +207,15 @@ bot_app.add_handler(CommandHandler("start", start_cmd))
 # --- Webhook ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await bot_app.initialize()  # Инициализация приложения
+    await bot_app.initialize()
     try:
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook set: {URL}/webhook")
     except Exception as e:
         logger.error(f"Webhook error: {e}")
-    await bot_app.start()  # Запуск внутренних задач для обработки очереди
+    await bot_app.start()
     yield
-    await bot_app.stop()  # Остановка при shutdown
+    await bot_app.stop()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -217,13 +223,23 @@ app = FastAPI(lifespan=lifespan)
 async def webhook(request: Request):
     try:
         json_update = await request.json()
+        logger.info(f"Incoming update: {json_update}")  # Логируем все обновления
         update = Update.de_json(json_update, bot_app.bot)
         if update:
-            await bot_app.process_update(update)  # Прямая обработка обновления
+            await bot_app.process_update(update)
         return {"ok": True}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return {"error": str(e)}, 500
+
+# Тестовый эндпоинт для проверки графика через браузер
+@app.get("/test-gc")
+async def test_gc():
+    df = smart_money_flow(FUTURES['gc'])
+    if df is None:
+        return {"error": "Not enough data"}
+    buf = make_chart(df, 'GC')
+    return StreamingResponse(buf, media_type="image/png")
 
 @app.get("/")
 async def root():
