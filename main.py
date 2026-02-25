@@ -426,17 +426,17 @@ async def test_gc():
     return StreamingResponse(buf, media_type="image/png")
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"status": "SmartMoney Bot alive!"}
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
-    return "OK"
+    return {"status": "OK"}
 
-@app.get("/ping")
+@app.api_route("/ping", methods=["GET", "HEAD"])
 async def ping():
-    return "OK"
+    return {"status": "OK"}
 
 
 # ────────────────────────────────────────────────
