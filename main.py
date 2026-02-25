@@ -260,7 +260,10 @@ async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in all_command: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
 
+async def chatid_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Your CHAT_ID: {update.message.chat_id}")
 
+bot_app.add_handler(CommandHandler("chatid", chatid_cmd))
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         txt  = "Smart Money Flow by Megatrend — commands:\n"
