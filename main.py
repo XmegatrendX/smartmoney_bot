@@ -430,6 +430,14 @@ async def test_gc():
 async def root():
     return {"status": "SmartMoney Bot alive!"}
 
+@app.get("/health")
+async def health():
+    return "OK"
+
+@app.get("/ping")
+async def ping():
+    return "OK"
+
 
 # ────────────────────────────────────────────────
 # Запуск
