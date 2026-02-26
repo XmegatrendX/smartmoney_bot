@@ -43,10 +43,38 @@ def smart_money_flow(symbol, days=175):
         return None
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
-    df['Vol_Z']    = (df['Volume'] - df['Volume'].rolling(20).mean()) / (df['Volume'].rolling(20).std() + 1e-8)
-    df['Price_Acc'] = df['Close'].pct_change().diff().fillna(0)
-    df['Signal']   = 0.8 * df['Vol_Z'] + 0.2 * df['Price_Acc']
-    df['Flow']     = (df['Signal'].clip(-3, 3) * 16.67 + 50).ewm(span=3).mean()
+
+    # 1. Percentile rank вместо z-score (0..100, устойчив к выбросам)
+    df['Vol_Pct'] = df['Volume'].rolling(20).apply(
+        lambda x: (x[:-1] < x[-1]).sum() / (len(x) - 1) * 100, raw=True
+    )
+
+    # 2. Vol_Trend — нарастает ли участие за последние 5 дней (0..100)
+    raw_trend       = df['Volume'].rolling(5).mean() / (df['Volume'].rolling(20).mean() + 1e-8) - 1
+    df['Vol_Trend'] = (raw_trend.clip(-1, 1) + 1) * 50
+
+    # 3. Price_Acc — ускорение цены (0..100)
+    raw_acc         = df['Close'].pct_change().diff().fillna(0)
+    df['Price_Acc'] = (raw_acc.clip(-0.03, 0.03) / 0.03 + 1) * 50
+
+    # Итоговый сигнал (все компоненты в 0..100)
+    df['Signal'] = (
+        0.7 * df['Vol_Pct'] +
+        0.2 * df['Vol_Trend'] +
+        0.1 * df['Price_Acc']
+    ).fillna(50)
+
+    # 4. Адаптивный span: активный рынок → span=3, тихий → span=10
+    vol_std   = df['Volume'].rolling(20).std() / (df['Volume'].rolling(20).mean() + 1e-8)
+    span_vals = (3 + (1 - vol_std.clip(0, 1)) * 7).fillna(5).round().astype(int).values
+    sig_vals  = df['Signal'].values
+    result    = np.zeros(len(sig_vals))
+    result[0] = sig_vals[0]
+    for i in range(1, len(sig_vals)):
+        alpha     = 2.0 / (span_vals[i] + 1.0)
+        result[i] = alpha * sig_vals[i] + (1 - alpha) * result[i - 1]
+
+    df['Flow'] = result
     return df
 
 
@@ -119,9 +147,12 @@ def make_chart(df, symbol):
 
     # ── Volume Stress / Participation Index ──
     ax1.plot(df.index, df['Flow'], label="Participation Index", linewidth=2, color='navy')
-    ax1.axhline(85, color='red',   linestyle='--', linewidth=1, label='Sell Zone (85)')
-    ax1.axhline(15, color='green', linestyle='--', linewidth=1, label='Buy Zone (15)')
+    ax1.axhline(85, color='red',   linestyle='--', linewidth=1, label='Overbought (85)')
+    ax1.axhline(15, color='green', linestyle='--', linewidth=1, label='Oversold (15)')
     ax1.axhline(50, color='gray',  linestyle='-',  alpha=0.4)
+    # Divergence highlight — закрашиваем зоны перегрева
+    ax1.fill_between(df.index, 85, df['Flow'].clip(lower=85), alpha=0.15, color='red')
+    ax1.fill_between(df.index, df['Flow'].clip(upper=15), 15, alpha=0.15, color='blue')
     ax1.set_title(f"{symbol} — Volume Stress / Participation Index", fontsize=14, fontweight='bold')
     ax1.set_ylim(0, 100)
     ax1.legend(loc='upper left', fontsize=9)
