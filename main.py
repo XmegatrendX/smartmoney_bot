@@ -117,12 +117,12 @@ def make_chart(df, symbol):
     )
     fig.subplots_adjust(hspace=0.05)
 
-    # ── Smart Money Flow ──
-    ax1.plot(df.index, df['Flow'], label="Smart Money Flow %", linewidth=2, color='navy')
+    # ── Volume Stress / Participation Index ──
+    ax1.plot(df.index, df['Flow'], label="Participation Index", linewidth=2, color='navy')
     ax1.axhline(85, color='red',   linestyle='--', linewidth=1, label='Sell Zone (85)')
     ax1.axhline(15, color='green', linestyle='--', linewidth=1, label='Buy Zone (15)')
     ax1.axhline(50, color='gray',  linestyle='-',  alpha=0.4)
-    ax1.set_title(f"{symbol} — Smart Money Flow", fontsize=14, fontweight='bold')
+    ax1.set_title(f"{symbol} — Volume Stress / Participation Index", fontsize=14, fontweight='bold')
     ax1.set_ylim(0, 100)
     ax1.legend(loc='upper left', fontsize=9)
     ax1.grid(alpha=0.3)
@@ -154,7 +154,6 @@ def make_chart(df, symbol):
     try:
         last_rsx  = float(rsx.iloc[-1])
         last_date = rsx.index[-1]
-        # найти пиковое значение для аннотации
         peak_idx  = rsx.idxmax()
         peak_val  = float(rsx.loc[peak_idx])
         ax2.annotate(
@@ -190,7 +189,6 @@ def make_distribution_chart():
     fig = plt.figure(figsize=(19, 9))
     gs  = fig.add_gridspec(1, 2, wspace=0.35)
 
-    # Current sentiment
     ax1 = fig.add_subplot(gs[0, 0])
     assets_list = list(flow_data.keys())
     scores = [float(flow_data[k].iloc[-1]) / 100.0 if len(flow_data[k]) > 0 else 0.0 for k in assets_list]
@@ -211,7 +209,6 @@ def make_distribution_chart():
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
                  f'{score*100:.1f}%', ha='center', va='bottom', fontweight='bold', fontsize=9)
 
-    # Distribution — bottom сбрасывается для каждой группы
     ax2 = fig.add_subplot(gs[0, 1])
     colors       = ['#006400', '#32CD32', 'gray', '#FF8C00', '#DC143C']
     level_ranges = [(70, 100), (55, 70), (45, 55), (30, 45), (0, 30)]
@@ -220,7 +217,7 @@ def make_distribution_chart():
     width = 0.15
 
     for i, (low, high) in enumerate(level_ranges):
-        bottom = np.zeros(len(assets_list))   # сброс для каждой группы
+        bottom = np.zeros(len(assets_list))
         values = np.array([
             int(((flow_data[asset] > low) & (flow_data[asset] <= high)).sum())
             for asset in assets_list
@@ -260,14 +257,12 @@ def make_distribution_chart():
 # Ежедневная отправка в 03:00 UTC
 # ────────────────────────────────────────────────
 async def daily_sender():
-    """Ждёт 03:00 UTC и отправляет все графики в CHAT_ID."""
     if not CHAT_ID:
         logger.warning("CHAT_ID не задан — ежедневная отправка отключена")
         return
 
     while True:
-        now  = datetime.now(timezone.utc)
-        # следующее 03:00 UTC
+        now      = datetime.now(timezone.utc)
         next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
         if now >= next_run:
             next_run = next_run.replace(day=next_run.day + 1)
@@ -285,7 +280,7 @@ async def daily_sender():
                 await bot_app.bot.send_photo(
                     chat_id=CHAT_ID,
                     photo=buf,
-                    caption=f"{cmd.upper()} — Smart Money Flow + RSX(9)"
+                    caption=f"{cmd.upper()} — Volume Stress / Participation Index + RSX(9)"
                 )
             buf_dist = make_distribution_chart()
             if buf_dist:
@@ -319,8 +314,8 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buf = make_chart(df, asset.upper())
         await update.message.reply_photo(photo=buf)
         txt  = f"{asset.upper()}:\n"
-        txt += f"Smart Money Flow: {last_flow:.1f}%\n" if last_flow is not None else "Smart Money Flow: n/a\n"
-        txt += f"RSX(9): {last_rsx:.1f}\n"             if last_rsx  is not None else "RSX(9): n/a\n"
+        txt += f"Participation Index: {last_flow:.1f}%\n" if last_flow is not None else "Participation Index: n/a\n"
+        txt += f"RSX(9): {last_rsx:.1f}\n"               if last_rsx  is not None else "RSX(9): n/a\n"
         txt += f"Date: {df.index[-1].strftime('%d.%m.%Y')}"
         await update.message.reply_text(txt)
     except Exception as e:
@@ -349,7 +344,7 @@ async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if df is None:
                 continue
             buf = make_chart(df, cmd.upper())
-            await update.message.reply_photo(photo=buf, caption=f"{cmd.upper()} — Smart Money Flow + RSX(9)")
+            await update.message.reply_photo(photo=buf, caption=f"{cmd.upper()} — Volume Stress / Participation Index + RSX(9)")
         bufd = make_distribution_chart()
         if bufd:
             await update.message.reply_photo(photo=bufd, caption="Distribution")
@@ -360,7 +355,7 @@ async def all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        txt  = "Smart Money Flow by Megatrend — commands:\n"
+        txt  = "Volume Stress / Participation Index by Megatrend — commands:\n"
         txt += "/gc /cl /pl /6e /6j /dx — charts\n"
         txt += "/dist — distribution\n"
         txt += "/all — all charts + distribution\n"
@@ -390,12 +385,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Webhook error: {e}")
     await bot_app.start()
-
-    # запускаем ежедневную отправку в фоне
     task = asyncio.create_task(daily_sender())
-
     yield
-
     task.cancel()
     await bot_app.stop()
 
@@ -439,9 +430,6 @@ async def ping():
     return {"status": "OK"}
 
 
-# ────────────────────────────────────────────────
-# Запуск
-# ────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
