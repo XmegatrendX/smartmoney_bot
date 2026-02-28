@@ -34,6 +34,53 @@ FUTURES = {
     '6e': '6E=F', '6j': '6J=F', 'dx': 'DX=F'
 }
 
+
+# ────────────────────────────────────────────────
+# Лунные перигеи
+# ────────────────────────────────────────────────
+def get_lunar_perigees(days_back: int = 175) -> list:
+    """Возвращает даты перигеев за последние days_back дней + один следующий."""
+    try:
+        import ephem
+    except ImportError:
+        return []
+    perigees  = []
+    start     = ephem.Date(datetime.now() - pd.Timedelta(days=days_back + 30))
+    end       = ephem.Date(datetime.now() + pd.Timedelta(days=35))
+    moon      = ephem.Moon()
+    cutoff    = pd.Timestamp(datetime.now() - pd.Timedelta(days=days_back))
+    now_ts    = pd.Timestamp(datetime.now())
+    date      = start
+    prev_dist = None
+    prev_date = None
+    while date < end:
+        moon.compute(date)
+        dist = moon.earth_distance
+        if prev_dist is not None and prev_dist < dist:
+            # Тернарный поиск минимума — точнее бинарного
+            lo, hi = prev_date, date
+            for _ in range(30):
+                m1 = lo + (hi - lo) / 3
+                m2 = lo + (hi - lo) * 2 / 3
+                moon.compute(m1); d1 = moon.earth_distance
+                moon.compute(m2); d2 = moon.earth_distance
+                if d1 < d2:
+                    hi = m2
+                else:
+                    lo = m1
+            perigee = (lo + hi) / 2
+            p = pd.Timestamp(ephem.Date(perigee).datetime())
+            # Защита от дублей: минимум 20 дней между перигеями
+            if (not perigees or (p - perigees[-1]).days > 20) and p >= cutoff:
+                perigees.append(p)
+                if p > now_ts:
+                    break  # нашли следующий — хватит
+        prev_dist = dist
+        prev_date = date
+        date += 0.5  # шаг 0.5 дня
+    return perigees
+
+
 # ────────────────────────────────────────────────
 # Smart Money Flow
 # ────────────────────────────────────────────────
@@ -126,7 +173,7 @@ def calculate_rsx(series: pd.Series, length: int = 9) -> pd.Series:
         f0     = 1 if (f88[i] >= f90[i] and f8[i] != f10[i]) else 0
         if f88[i] == f90[i] and f0 == 0:
             f90[i] = 0
-        v4     = (v14 / v20 + 1.0) * 50.0 if (f88[i] < f90[i] and v20 > 0) else 50.0
+        v4     = (v14 / v20 + 1.0) * 50.0 if (f88[i] < f90[i] and abs(v20) > 1e-8) else 50.0
         rsx[i] = max(0.0, min(100.0, v4))
 
     return pd.Series(rsx, index=series.index)
@@ -136,7 +183,9 @@ def calculate_rsx(series: pd.Series, length: int = 9) -> pd.Series:
 # График: Flow + RSX подграфик
 # ────────────────────────────────────────────────
 def make_chart(df, symbol):
-    rsx = calculate_rsx(df['Close'], length=9)
+    rsx      = calculate_rsx(df['Flow'], length=9)
+    perigees = get_lunar_perigees(175)
+    now_ts   = pd.Timestamp(datetime.now())
 
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(12, 8),
@@ -150,9 +199,20 @@ def make_chart(df, symbol):
     ax1.axhline(85, color='red',   linestyle='--', linewidth=1, label='Overbought (85)')
     ax1.axhline(15, color='green', linestyle='--', linewidth=1, label='Oversold (15)')
     ax1.axhline(50, color='gray',  linestyle='-',  alpha=0.4)
-    # Divergence highlight — закрашиваем зоны перегрева
     ax1.fill_between(df.index, 85, df['Flow'].clip(lower=85), alpha=0.15, color='red')
     ax1.fill_between(df.index, df['Flow'].clip(upper=15), 15, alpha=0.15, color='blue')
+
+    # Лунные перигеи на ax1
+    for p in perigees:
+        if p <= now_ts:
+            ax1.axvline(p, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+        else:
+            ax1.axvline(p, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
+            ax1.text(p, 92, f"↓ {p.strftime('%d.%m')}", color='red',
+                     fontsize=7, ha='center',
+                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='red', alpha=0.8))
+            break  # только один следующий
+
     ax1.set_title(f"{symbol} — Volume Stress / Participation Index", fontsize=14, fontweight='bold')
     ax1.set_ylim(0, 100)
     ax1.legend(loc='upper left', fontsize=9)
@@ -176,6 +236,15 @@ def make_chart(df, symbol):
     ax2.plot(df.index, rsx, label="RSX(9)", linewidth=1.5, color='orange')
     ax2.axhline(70, color='red',   linestyle='--', linewidth=1)
     ax2.axhline(30, color='green', linestyle='--', linewidth=1)
+
+    # Лунные перигеи на ax2
+    for p in perigees:
+        if p <= now_ts:
+            ax2.axvline(p, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+        else:
+            ax2.axvline(p, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
+            break  # только один следующий
+
     ax2.set_ylim(0, 100)
     ax2.set_ylabel('RSX(9)', fontsize=9)
     ax2.legend(loc='upper left', fontsize=9)
@@ -196,6 +265,57 @@ def make_chart(df, symbol):
         )
     except Exception:
         pass
+
+    # ── Легенда фаз рынка ──
+    phases = [
+        ("Accumulation", "Накопление",   "Сжатие, тихий рынок, скрытое участие",          "20–45, волатильность низкая",            "#4169E1"),
+        ("Expansion",    "Расширение",   "Резкий рост участия, вход объёма",               "Прорыв выше 55–60, быстрый наклон вверх","#228B22"),
+        ("Trend",        "Тренд/Удерж.", "Участие стабильно высокое",                      "65–85, держится выше 60",                "#006400"),
+        ("Distribution", "Распределение","Индекс высокий, но цена теряет импульс",         "70–90, RSX ↓ или дивергенция",           "#FF8C00"),
+        ("Collapse",     "Сброс/Капит.", "Агрессивный выход объёма вниз",                  "Резкое падение ниже 40, ускорение вниз", "#DC143C"),
+    ]
+
+    # добавляем третий подграфик только для таблицы
+    ax_table = fig.add_axes([0.01, -0.22, 0.98, 0.20])
+    ax_table.axis('off')
+
+    col_labels = ["Фаза", "Рус. название", "Что происходит", "Показания индекса"]
+    col_widths = [0.10, 0.13, 0.46, 0.31]
+    row_h = 0.16
+    header_y = 0.92
+
+    # заголовки
+    x = 0.0
+    for label, w in zip(col_labels, col_widths):
+        ax_table.text(x + w/2, header_y, label,
+                      ha='center', va='center', fontsize=7.5, fontweight='bold',
+                      transform=ax_table.transAxes,
+                      bbox=dict(boxstyle='square,pad=0.3', fc='#2c2c2c', ec='none'))
+        ax_table.text(x + w/2, header_y, label,
+                      ha='center', va='center', fontsize=7.5, fontweight='bold',
+                      color='white', transform=ax_table.transAxes)
+        x += w
+
+    # строки
+    for row_i, (eng, rus, what, index_val, color) in enumerate(phases):
+        y = header_y - (row_i + 1) * row_h
+        row_data = [eng, rus, what, index_val]
+        x = 0.0
+        bg = '#f9f9f9' if row_i % 2 == 0 else '#ffffff'
+        for col_i, (val, w) in enumerate(zip(row_data, col_widths)):
+            ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), w, row_h*0.9,
+                                             transform=ax_table.transAxes,
+                                             fc=bg, ec='#cccccc', linewidth=0.5,
+                                             clip_on=False))
+            # цветной маркер в первой колонке
+            if col_i == 0:
+                ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), 0.004, row_h*0.9,
+                                                 transform=ax_table.transAxes,
+                                                 fc=color, ec='none', clip_on=False))
+            ax_table.text(x + w/2, y, val,
+                          ha='center', va='center', fontsize=7,
+                          transform=ax_table.transAxes, color='#111111')
+            x += w
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
@@ -339,7 +459,7 @@ async def handle_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if df is None:
             await update.message.reply_text("Not enough data.")
             return
-        rsx       = calculate_rsx(df['Close'], length=9)
+        rsx       = calculate_rsx(df['Flow'], length=9)
         last_flow = float(df['Flow'].iloc[-1]) if len(df)  > 0 else None
         last_rsx  = float(rsx.iloc[-1])        if len(rsx) > 0 else None
         buf = make_chart(df, asset.upper())
