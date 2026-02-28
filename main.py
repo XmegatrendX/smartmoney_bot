@@ -205,39 +205,35 @@ def calculate_rsx(series: pd.Series, length: int = 9) -> pd.Series:
 
 
 # ────────────────────────────────────────────────
-# График: Flow + RSX подграфик
+# График: Flow + RSX + таблица фаз
 # ────────────────────────────────────────────────
 def make_chart(df, symbol):
+    import matplotlib.gridspec as gridspec
+
     rsx      = calculate_rsx(df['Flow'], length=9)
     perigees = get_lunar_perigees(175)
-    now_ts   = pd.Timestamp(datetime.now())
+    now_ts   = pd.Timestamp(datetime.now()).tz_localize(None)
 
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(12, 8),
-        gridspec_kw={'height_ratios': [2, 1]},
-        sharex=True
-    )
-    fig.subplots_adjust(hspace=0.05)
+    # Нормализуем индекс df — убираем timezone если есть
+    if hasattr(df.index, 'tz') and df.index.tz is not None:
+        df = df.copy()
+        df.index = df.index.tz_localize(None)
+        rsx.index = rsx.index.tz_localize(None)
 
-    # ── Volume Stress / Participation Index ──
+    fig = plt.figure(figsize=(12, 11))
+    gs  = gridspec.GridSpec(3, 1, height_ratios=[2.5, 1, 0.85], hspace=0.08)
+    ax1 = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+    ax3 = fig.add_subplot(gs[2])
+    ax3.axis('off')
+
+    # ── ax1: Participation Index ──
     ax1.plot(df.index, df['Flow'], label="Participation Index", linewidth=2, color='navy')
     ax1.axhline(85, color='red',   linestyle='--', linewidth=1, label='Overbought (85)')
     ax1.axhline(15, color='green', linestyle='--', linewidth=1, label='Oversold (15)')
     ax1.axhline(50, color='gray',  linestyle='-',  alpha=0.4)
     ax1.fill_between(df.index, 85, df['Flow'].clip(lower=85), alpha=0.15, color='red')
     ax1.fill_between(df.index, df['Flow'].clip(upper=15), 15, alpha=0.15, color='blue')
-
-    # Лунные перигеи на ax1
-    for p in perigees:
-        if p <= now_ts:
-            ax1.axvline(p, color='crimson', linestyle='--', linewidth=0.8, alpha=0.55)
-        else:
-            ax1.axvline(p, color='crimson', linestyle='--', linewidth=1.3, alpha=0.95)
-            ax1.text(p, 94, f"↓ {p.strftime('%d.%m')}", color='crimson',
-                     fontsize=7, ha='center',
-                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.85))
-            break
-
     ax1.set_title(f"{symbol} — Volume Stress / Participation Index", fontsize=14, fontweight='bold')
     ax1.set_ylim(0, 100)
     ax1.legend(loc='upper left', fontsize=9)
@@ -257,30 +253,20 @@ def make_chart(df, symbol):
     except Exception:
         pass
 
-    # ── RSX(9) ──
+    # ── ax2: RSX ──
     ax2.plot(df.index, rsx, label="RSX(9)", linewidth=1.5, color='orange')
     ax2.axhline(70, color='red',   linestyle='--', linewidth=1)
     ax2.axhline(30, color='green', linestyle='--', linewidth=1)
-
-    # Лунные перигеи на ax2
-    for p in perigees:
-        if p <= now_ts:
-            ax2.axvline(p, color='crimson', linestyle='--', linewidth=0.8, alpha=0.55)
-        else:
-            ax2.axvline(p, color='crimson', linestyle='--', linewidth=1.3, alpha=0.95)
-            break
-
+    ax2.axhline(50, color='gray',  linestyle='-',  alpha=0.4)
     ax2.set_ylim(0, 100)
     ax2.set_ylabel('RSX(9)', fontsize=9)
     ax2.legend(loc='upper left', fontsize=9)
     ax2.grid(alpha=0.3)
 
-    # аннотация последнего RSX
+    # аннотация пика RSX
     try:
-        last_rsx  = float(rsx.iloc[-1])
-        last_date = rsx.index[-1]
-        peak_idx  = rsx.idxmax()
-        peak_val  = float(rsx.loc[peak_idx])
+        peak_idx = rsx.idxmax()
+        peak_val = float(rsx.loc[peak_idx])
         ax2.annotate(
             f"{peak_idx.strftime('%d.%m.%Y')}\nRSX: {peak_val:.1f}",
             xy=(peak_idx, peak_val),
@@ -290,6 +276,20 @@ def make_chart(df, symbol):
         )
     except Exception:
         pass
+
+    # ── Лунные перигеи — рисуем в конце, ось уже инициализирована ──
+    for p in perigees:
+        p_n = p.tz_localize(None) if p.tzinfo is not None else p
+        if p_n <= now_ts:
+            ax1.axvline(p_n, color='crimson', linestyle='--', linewidth=0.9, alpha=0.6, zorder=5)
+            ax2.axvline(p_n, color='crimson', linestyle='--', linewidth=0.9, alpha=0.6, zorder=5)
+        else:
+            ax1.axvline(p_n, color='crimson', linestyle='--', linewidth=1.4, alpha=0.95, zorder=5)
+            ax2.axvline(p_n, color='crimson', linestyle='--', linewidth=1.4, alpha=0.95, zorder=5)
+            ax1.text(p_n, 93, f"↓ {p.strftime('%d.%m')}", color='crimson',
+                     fontsize=7.5, ha='center', fontweight='bold', zorder=6,
+                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.9))
+            break
 
     # ── Легенда фаз рынка (обновлённая) ──
     phases = [
@@ -304,9 +304,7 @@ def make_chart(df, symbol):
         ("Bear Trend",    "Медвежий тренд",  "< 30",    "30–50",  "Давление удерживается",                 "Стабильный медвежий режим",             "#660000"),
     ]
 
-    ax_table = fig.add_axes([0.01, -0.32, 0.98, 0.30])
-    ax_table.axis('off')
-
+    # ax3 уже создан через GridSpec выше
     col_labels = ["Фаза", "Рус. название", "Flow", "RSX(Flow)", "Что происходит", "Что это значит"]
     col_widths  = [0.11,   0.13,            0.07,   0.07,        0.32,             0.30]
     row_h    = 0.105
@@ -315,12 +313,12 @@ def make_chart(df, symbol):
     # заголовки
     x = 0.0
     for label, w in zip(col_labels, col_widths):
-        ax_table.add_patch(plt.Rectangle((x, header_y - 0.04), w, 0.09,
-                                         transform=ax_table.transAxes,
-                                         fc='#1a1a2e', ec='none', clip_on=False))
-        ax_table.text(x + w/2, header_y, label,
-                      ha='center', va='center', fontsize=7.5, fontweight='bold',
-                      color='white', transform=ax_table.transAxes)
+        ax3.add_patch(plt.Rectangle((x, header_y - 0.04), w, 0.09,
+                                    transform=ax3.transAxes,
+                                    fc='#1a1a2e', ec='none', clip_on=False))
+        ax3.text(x + w/2, header_y, label,
+                 ha='center', va='center', fontsize=7.5, fontweight='bold',
+                 color='white', transform=ax3.transAxes)
         x += w
 
     # строки
@@ -330,17 +328,17 @@ def make_chart(df, symbol):
         row_data = [eng, rus, flow_r, rsx_r, what, meaning]
         x = 0.0
         for col_i, (val, w) in enumerate(zip(row_data, col_widths)):
-            ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), w, row_h*0.9,
-                                             transform=ax_table.transAxes,
-                                             fc=bg, ec='#dddddd', linewidth=0.4,
-                                             clip_on=False))
+            ax3.add_patch(plt.Rectangle((x, y - row_h*0.45), w, row_h*0.9,
+                                        transform=ax3.transAxes,
+                                        fc=bg, ec='#dddddd', linewidth=0.4,
+                                        clip_on=False))
             if col_i == 0:
-                ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), 0.005, row_h*0.9,
-                                                 transform=ax_table.transAxes,
-                                                 fc=color, ec='none', clip_on=False))
-            ax_table.text(x + w/2, y, val,
-                          ha='center', va='center', fontsize=6.8,
-                          transform=ax_table.transAxes, color='#111111')
+                ax3.add_patch(plt.Rectangle((x, y - row_h*0.45), 0.005, row_h*0.9,
+                                            transform=ax3.transAxes,
+                                            fc=color, ec='none', clip_on=False))
+            ax3.text(x + w/2, y, val,
+                     ha='center', va='center', fontsize=6.8,
+                     transform=ax3.transAxes, color='#111111')
             x += w
 
     buf = io.BytesIO()
