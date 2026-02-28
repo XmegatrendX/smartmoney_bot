@@ -91,27 +91,26 @@ def smart_money_flow(symbol, days=175):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
 
-    # 1. Percentile rank вместо z-score (0..100, устойчив к выбросам)
+    # 1. Percentile rank (0..100, устойчив к выбросам)
     df['Vol_Pct'] = df['Volume'].rolling(20).apply(
         lambda x: (x[:-1] < x[-1]).sum() / (len(x) - 1) * 100, raw=True
     )
 
-    # 2. Vol_Trend — нарастает ли участие за последние 5 дней (0..100)
+    # 2. Vol_Trend (0..100)
     raw_trend       = df['Volume'].rolling(5).mean() / (df['Volume'].rolling(20).mean() + 1e-8) - 1
     df['Vol_Trend'] = (raw_trend.clip(-1, 1) + 1) * 50
 
-    # 3. Price_Acc — ускорение цены (0..100)
+    # 3. Price_Acc (0..100)
     raw_acc         = df['Close'].pct_change().diff().fillna(0)
     df['Price_Acc'] = (raw_acc.clip(-0.03, 0.03) / 0.03 + 1) * 50
 
-    # Итоговый сигнал (все компоненты в 0..100)
     df['Signal'] = (
         0.7 * df['Vol_Pct'] +
         0.2 * df['Vol_Trend'] +
         0.1 * df['Price_Acc']
     ).fillna(50)
 
-    # 4. Адаптивный span: активный рынок → span=3, тихий → span=10
+    # 4. Адаптивный span
     vol_std   = df['Volume'].rolling(20).std() / (df['Volume'].rolling(20).mean() + 1e-8)
     span_vals = (3 + (1 - vol_std.clip(0, 1)) * 7).fillna(5).round().astype(int).values
     sig_vals  = df['Signal'].values
@@ -121,7 +120,33 @@ def smart_money_flow(symbol, days=175):
         alpha     = 2.0 / (span_vals[i] + 1.0)
         result[i] = alpha * sig_vals[i] + (1 - alpha) * result[i - 1]
 
-    df['Flow'] = result
+    # 5. Smart A/D direction (как в дашборде)
+    vol_z     = (df['Volume'] - df['Volume'].rolling(20).mean()) / (df['Volume'].rolling(20).std() + 1e-8)
+    mfm       = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'] + 1e-8)
+    smart_vol = (mfm * df['Volume'] * vol_z.clip(lower=1)).fillna(0)
+    smart_ad  = smart_vol.cumsum().ewm(span=5).mean().values
+    ad_min, ad_max = smart_ad.min(), smart_ad.max()
+    if ad_max - ad_min > 1e-8:
+        smart_ad_pct = (smart_ad - ad_min) / (ad_max - ad_min) * 100
+    else:
+        smart_ad_pct = np.full(len(smart_ad), 50.0)
+    smart_ad_s  = pd.Series(smart_ad_pct, index=df.index)
+    center      = smart_ad_s.rolling(200, min_periods=50).median()
+    direction   = np.sign(smart_ad_s - center).fillna(0).values
+
+    flow_signed  = 50 + (result - 50) * direction
+    flow_clipped = np.clip(flow_signed, 0, 100)
+
+    # Огибающая + сглаживание
+    flow_s   = pd.Series(flow_clipped)
+    envelope = np.where(
+        flow_s >= 50,
+        flow_s.rolling(5, min_periods=1).max(),
+        flow_s.rolling(5, min_periods=1).min()
+    )
+    smoothed = pd.Series(envelope).ewm(span=3).mean().values
+
+    df['Flow'] = smoothed
     return df
 
 
@@ -203,17 +228,15 @@ def make_chart(df, symbol):
     ax1.fill_between(df.index, df['Flow'].clip(upper=15), 15, alpha=0.15, color='blue')
 
     # Лунные перигеи на ax1
-    import matplotlib.dates as mdates
     for p in perigees:
-        p_num = mdates.date2num(p.to_pydatetime())
         if p <= now_ts:
-            ax1.axvline(p_num, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+            ax1.axvline(p, color='crimson', linestyle='--', linewidth=0.8, alpha=0.55)
         else:
-            ax1.axvline(p_num, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
-            ax1.text(p_num, 92, f"↓ {p.strftime('%d.%m')}", color='red',
+            ax1.axvline(p, color='crimson', linestyle='--', linewidth=1.3, alpha=0.95)
+            ax1.text(p, 94, f"↓ {p.strftime('%d.%m')}", color='crimson',
                      fontsize=7, ha='center',
-                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='red', alpha=0.8))
-            break  # только один следующий
+                     bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.85))
+            break
 
     ax1.set_title(f"{symbol} — Volume Stress / Participation Index", fontsize=14, fontweight='bold')
     ax1.set_ylim(0, 100)
@@ -241,12 +264,11 @@ def make_chart(df, symbol):
 
     # Лунные перигеи на ax2
     for p in perigees:
-        p_num = mdates.date2num(p.to_pydatetime())
         if p <= now_ts:
-            ax2.axvline(p_num, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+            ax2.axvline(p, color='crimson', linestyle='--', linewidth=0.8, alpha=0.55)
         else:
-            ax2.axvline(p_num, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
-            break  # только один следующий
+            ax2.axvline(p, color='crimson', linestyle='--', linewidth=1.3, alpha=0.95)
+            break
 
     ax2.set_ylim(0, 100)
     ax2.set_ylabel('RSX(9)', fontsize=9)
@@ -269,54 +291,55 @@ def make_chart(df, symbol):
     except Exception:
         pass
 
-    # ── Легенда фаз рынка ──
+    # ── Легенда фаз рынка (обновлённая) ──
     phases = [
-        ("Accumulation", "Накопление",   "Сжатие, тихий рынок, скрытое участие",          "20–45, волатильность низкая",            "#4169E1"),
-        ("Expansion",    "Расширение",   "Резкий рост участия, вход объёма",               "Прорыв выше 55–60, быстрый наклон вверх","#228B22"),
-        ("Trend",        "Тренд/Удерж.", "Участие стабильно высокое",                      "65–85, держится выше 60",                "#006400"),
-        ("Distribution", "Распределение","Индекс высокий, но цена теряет импульс",         "70–90, RSX ↓ или дивергенция",           "#FF8C00"),
-        ("Collapse",     "Сброс/Капит.", "Агрессивный выход объёма вниз",                  "Резкое падение ниже 40, ускорение вниз", "#DC143C"),
+        # (eng,                  rus,               flow_range,   rsx_range,  what,                                    meaning,                              color)
+        ("Accumulation",  "Накопление",      "30–50",   "40–60",  "Участие начинает появляться",           "Формирование базы, подготовка режима",  "#4169E1"),
+        ("Expansion",     "Экспансия",       "> 60–70", "> 70",   "Резкое ускорение участия",              "Включился импульс режима",              "#32CD32"),
+        ("Trend",         "Тренд",           "> 70",    "50–70",  "Участие держится стабильно",            "Режим устойчив, идёт протяжка",         "#006400"),
+        ("Distribution",  "Распределение",   "> 70",    "↓ LH",   "Импульс участия слабеет",               "Смарт-деньги выгружаются",              "#FF8C00"),
+        ("Balance",       "Сжатие/Баланс",   "45–55",   "40–60",  "Нет явного режима",                     "Переходная зона",                       "#888888"),
+        ("Collapse",      "Коллапс",         "< 40",    "< 30",   "Резкий выход участия вниз",             "Смена режима / ликвидация",             "#DC143C"),
+        ("Bear Exp.",     "Медвежья эксп.",  "< 40",    "< 30",   "Ускорение вниз",                        "Активный продавец",                     "#8B0000"),
+        ("Bear Trend",    "Медвежий тренд",  "< 30",    "30–50",  "Давление удерживается",                 "Стабильный медвежий режим",             "#660000"),
     ]
 
-    # добавляем третий подграфик только для таблицы
-    ax_table = fig.add_axes([0.01, -0.22, 0.98, 0.20])
+    ax_table = fig.add_axes([0.01, -0.32, 0.98, 0.30])
     ax_table.axis('off')
 
-    col_labels = ["Фаза", "Рус. название", "Что происходит", "Показания индекса"]
-    col_widths = [0.10, 0.13, 0.46, 0.31]
-    row_h = 0.16
-    header_y = 0.92
+    col_labels = ["Фаза", "Рус. название", "Flow", "RSX(Flow)", "Что происходит", "Что это значит"]
+    col_widths  = [0.11,   0.13,            0.07,   0.07,        0.32,             0.30]
+    row_h    = 0.105
+    header_y = 0.95
 
     # заголовки
     x = 0.0
     for label, w in zip(col_labels, col_widths):
-        ax_table.text(x + w/2, header_y, label,
-                      ha='center', va='center', fontsize=7.5, fontweight='bold',
-                      transform=ax_table.transAxes,
-                      bbox=dict(boxstyle='square,pad=0.3', fc='#2c2c2c', ec='none'))
+        ax_table.add_patch(plt.Rectangle((x, header_y - 0.04), w, 0.09,
+                                         transform=ax_table.transAxes,
+                                         fc='#1a1a2e', ec='none', clip_on=False))
         ax_table.text(x + w/2, header_y, label,
                       ha='center', va='center', fontsize=7.5, fontweight='bold',
                       color='white', transform=ax_table.transAxes)
         x += w
 
     # строки
-    for row_i, (eng, rus, what, index_val, color) in enumerate(phases):
-        y = header_y - (row_i + 1) * row_h
-        row_data = [eng, rus, what, index_val]
+    for row_i, (eng, rus, flow_r, rsx_r, what, meaning, color) in enumerate(phases):
+        y  = header_y - 0.04 - (row_i + 1) * row_h
+        bg = '#f4f4f4' if row_i % 2 == 0 else '#ffffff'
+        row_data = [eng, rus, flow_r, rsx_r, what, meaning]
         x = 0.0
-        bg = '#f9f9f9' if row_i % 2 == 0 else '#ffffff'
         for col_i, (val, w) in enumerate(zip(row_data, col_widths)):
             ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), w, row_h*0.9,
                                              transform=ax_table.transAxes,
-                                             fc=bg, ec='#cccccc', linewidth=0.5,
+                                             fc=bg, ec='#dddddd', linewidth=0.4,
                                              clip_on=False))
-            # цветной маркер в первой колонке
             if col_i == 0:
-                ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), 0.004, row_h*0.9,
+                ax_table.add_patch(plt.Rectangle((x, y - row_h*0.45), 0.005, row_h*0.9,
                                                  transform=ax_table.transAxes,
                                                  fc=color, ec='none', clip_on=False))
             ax_table.text(x + w/2, y, val,
-                          ha='center', va='center', fontsize=7,
+                          ha='center', va='center', fontsize=6.8,
                           transform=ax_table.transAxes, color='#111111')
             x += w
 
