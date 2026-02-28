@@ -203,12 +203,14 @@ def make_chart(df, symbol):
     ax1.fill_between(df.index, df['Flow'].clip(upper=15), 15, alpha=0.15, color='blue')
 
     # Лунные перигеи на ax1
+    import matplotlib.dates as mdates
     for p in perigees:
+        p_num = mdates.date2num(p.to_pydatetime())
         if p <= now_ts:
-            ax1.axvline(p, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+            ax1.axvline(p_num, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
         else:
-            ax1.axvline(p, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
-            ax1.text(p, 92, f"↓ {p.strftime('%d.%m')}", color='red',
+            ax1.axvline(p_num, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
+            ax1.text(p_num, 92, f"↓ {p.strftime('%d.%m')}", color='red',
                      fontsize=7, ha='center',
                      bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='red', alpha=0.8))
             break  # только один следующий
@@ -239,10 +241,11 @@ def make_chart(df, symbol):
 
     # Лунные перигеи на ax2
     for p in perigees:
+        p_num = mdates.date2num(p.to_pydatetime())
         if p <= now_ts:
-            ax2.axvline(p, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+            ax2.axvline(p_num, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
         else:
-            ax2.axvline(p, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
+            ax2.axvline(p_num, color='red', linestyle='--', linewidth=1.2, alpha=0.9)
             break  # только один следующий
 
     ax2.set_ylim(0, 100)
