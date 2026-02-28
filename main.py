@@ -281,12 +281,12 @@ def make_chart(df, symbol):
     for p in perigees:
         p_n = p.tz_localize(None) if p.tzinfo is not None else p
         if p_n <= now_ts:
-            ax1.axvline(p_n, color='crimson', linestyle='--', linewidth=0.9, alpha=0.6, zorder=5)
-            ax2.axvline(p_n, color='crimson', linestyle='--', linewidth=0.9, alpha=0.6, zorder=5)
+            ax1.axvline(p_n, color='red', linestyle='--', linewidth=0.9, alpha=0.6, zorder=5)
+            ax2.axvline(p_n, color='red', linestyle='--', linewidth=0.9, alpha=0.6, zorder=5)
         else:
-            ax1.axvline(p_n, color='crimson', linestyle='--', linewidth=1.4, alpha=0.95, zorder=5)
-            ax2.axvline(p_n, color='crimson', linestyle='--', linewidth=1.4, alpha=0.95, zorder=5)
-            ax1.text(p_n, 93, f"↓ {p.strftime('%d.%m')}", color='crimson',
+            ax1.axvline(p_n, color='red', linestyle='--', linewidth=1.4, alpha=0.95, zorder=5)
+            ax2.axvline(p_n, color='red', linestyle='--', linewidth=1.4, alpha=0.95, zorder=5)
+            ax1.text(p_n, 93, f"↓ {p.strftime('%d.%m')}", color='red',
                      fontsize=7.5, ha='center', fontweight='bold', zorder=6,
                      bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.9))
             break
