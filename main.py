@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta   # ✅ добавлен timedelta
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +24,7 @@ if not TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is not set!")
 
 URL     = "https://smartmoney-bot-ilqm.onrender.com"
-CHAT_ID = int(os.getenv("CHAT_ID", "0"))   # задать в env переменных Render
+CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 
 # --- Telegram Bot ---
 bot_app = ApplicationBuilder().token(TOKEN).build()
@@ -57,7 +57,6 @@ def get_lunar_perigees(days_back: int = 175) -> list:
         moon.compute(date)
         dist = moon.earth_distance
         if prev_dist is not None and prev_dist < dist:
-            # Тернарный поиск минимума — точнее бинарного
             lo, hi = prev_date, date
             for _ in range(30):
                 m1 = lo + (hi - lo) / 3
@@ -70,14 +69,13 @@ def get_lunar_perigees(days_back: int = 175) -> list:
                     lo = m1
             perigee = (lo + hi) / 2
             p = pd.Timestamp(ephem.Date(perigee).datetime())
-            # Защита от дублей: минимум 20 дней между перигеями
             if (not perigees or (p - perigees[-1]).days > 20) and p >= cutoff:
                 perigees.append(p)
                 if p > now_ts:
-                    break  # нашли следующий — хватит
+                    break
         prev_dist = dist
         prev_date = date
-        date += 0.5  # шаг 0.5 дня
+        date += 0.5
     return perigees
 
 
@@ -91,16 +89,13 @@ def smart_money_flow(symbol, days=175):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.droplevel(1)
 
-    # 1. Percentile rank (0..100, устойчив к выбросам)
     df['Vol_Pct'] = df['Volume'].rolling(20).apply(
         lambda x: (x[:-1] < x[-1]).sum() / (len(x) - 1) * 100, raw=True
     )
 
-    # 2. Vol_Trend (0..100)
     raw_trend       = df['Volume'].rolling(5).mean() / (df['Volume'].rolling(20).mean() + 1e-8) - 1
     df['Vol_Trend'] = (raw_trend.clip(-1, 1) + 1) * 50
 
-    # 3. Price_Acc (0..100)
     raw_acc         = df['Close'].pct_change().diff().fillna(0)
     df['Price_Acc'] = (raw_acc.clip(-0.03, 0.03) / 0.03 + 1) * 50
 
@@ -110,7 +105,6 @@ def smart_money_flow(symbol, days=175):
         0.1 * df['Price_Acc']
     ).fillna(50)
 
-    # 4. Адаптивный span
     vol_std   = df['Volume'].rolling(20).std() / (df['Volume'].rolling(20).mean() + 1e-8)
     span_vals = (3 + (1 - vol_std.clip(0, 1)) * 7).fillna(5).round().astype(int).values
     sig_vals  = df['Signal'].values
@@ -120,7 +114,6 @@ def smart_money_flow(symbol, days=175):
         alpha     = 2.0 / (span_vals[i] + 1.0)
         result[i] = alpha * sig_vals[i] + (1 - alpha) * result[i - 1]
 
-    # 5. Smart A/D direction (как в дашборде)
     vol_z     = (df['Volume'] - df['Volume'].rolling(20).mean()) / (df['Volume'].rolling(20).std() + 1e-8)
     mfm       = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'] + 1e-8)
     smart_vol = (mfm * df['Volume'] * vol_z.clip(lower=1)).fillna(0)
@@ -137,7 +130,6 @@ def smart_money_flow(symbol, days=175):
     flow_signed  = 50 + (result - 50) * direction
     flow_clipped = np.clip(flow_signed, 0, 100)
 
-    # Огибающая + сглаживание
     flow_s   = pd.Series(flow_clipped)
     envelope = np.where(
         flow_s >= 50,
@@ -214,7 +206,6 @@ def make_chart(df, symbol):
     perigees = get_lunar_perigees(175)
     now_ts   = pd.Timestamp(datetime.now()).tz_localize(None)
 
-    # Нормализуем индекс df — убираем timezone если есть
     if hasattr(df.index, 'tz') and df.index.tz is not None:
         df = df.copy()
         df.index = df.index.tz_localize(None)
@@ -227,7 +218,6 @@ def make_chart(df, symbol):
     ax3 = fig.add_subplot(gs[2])
     ax3.axis('off')
 
-    # ── ax1: Participation Index ──
     ax1.plot(df.index, df['Flow'], label="Participation Index", linewidth=2, color='navy')
     ax1.axhline(85, color='red',   linestyle='--', linewidth=1, label='Overbought (85)')
     ax1.axhline(15, color='green', linestyle='--', linewidth=1, label='Oversold (15)')
@@ -239,7 +229,6 @@ def make_chart(df, symbol):
     ax1.legend(loc='upper left', fontsize=9)
     ax1.grid(alpha=0.3)
 
-    # аннотация последнего значения
     try:
         last_flow = float(df['Flow'].iloc[-1])
         last_date = df.index[-1]
@@ -253,7 +242,6 @@ def make_chart(df, symbol):
     except Exception:
         pass
 
-    # ── ax2: RSX ──
     ax2.plot(df.index, rsx, label="RSX(9)", linewidth=1.5, color='orange')
     ax2.axhline(70, color='red',   linestyle='--', linewidth=1)
     ax2.axhline(30, color='green', linestyle='--', linewidth=1)
@@ -263,7 +251,6 @@ def make_chart(df, symbol):
     ax2.legend(loc='upper left', fontsize=9)
     ax2.grid(alpha=0.3)
 
-    # аннотация пика RSX
     try:
         peak_idx = rsx.idxmax()
         peak_val = float(rsx.loc[peak_idx])
@@ -277,7 +264,6 @@ def make_chart(df, symbol):
     except Exception:
         pass
 
-    # ── Лунные перигеи — рисуем в конце, ось уже инициализирована ──
     for p in perigees:
         p_n = p.tz_localize(None) if p.tzinfo is not None else p
         if p_n <= now_ts:
@@ -291,9 +277,7 @@ def make_chart(df, symbol):
                      bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='crimson', alpha=0.9))
             break
 
-    # ── Легенда фаз рынка (обновлённая) ──
     phases = [
-        # (eng,                  rus,               flow_range,   rsx_range,  what,                                    meaning,                              color)
         ("Accumulation",  "Накопление",      "30–50",   "40–60",  "Участие начинает появляться",           "Формирование базы, подготовка режима",  "#4169E1"),
         ("Expansion",     "Экспансия",       "> 60–70", "> 70",   "Резкое ускорение участия",              "Включился импульс режима",              "#32CD32"),
         ("Trend",         "Тренд",           "> 70",    "50–70",  "Участие держится стабильно",            "Режим устойчив, идёт протяжка",         "#006400"),
@@ -304,13 +288,11 @@ def make_chart(df, symbol):
         ("Bear Trend",    "Медвежий тренд",  "< 30",    "30–50",  "Давление удерживается",                 "Стабильный медвежий режим",             "#660000"),
     ]
 
-    # ax3 уже создан через GridSpec выше
     col_labels = ["Фаза", "Рус. название", "Flow", "RSX(Flow)", "Что происходит", "Что это значит"]
     col_widths  = [0.11,   0.13,            0.07,   0.07,        0.32,             0.30]
     row_h    = 0.105
     header_y = 0.95
 
-    # заголовки
     x = 0.0
     for label, w in zip(col_labels, col_widths):
         ax3.add_patch(plt.Rectangle((x, header_y - 0.04), w, 0.09,
@@ -321,7 +303,6 @@ def make_chart(df, symbol):
                  color='white', transform=ax3.transAxes)
         x += w
 
-    # строки
     for row_i, (eng, rus, flow_r, rsx_r, what, meaning, color) in enumerate(phases):
         y  = header_y - 0.04 - (row_i + 1) * row_h
         bg = '#f4f4f4' if row_i % 2 == 0 else '#ffffff'
@@ -440,7 +421,7 @@ async def daily_sender():
         now      = datetime.now(timezone.utc)
         next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
         if now >= next_run:
-            next_run = next_run.replace(day=next_run.day + 1)
+            next_run += timedelta(days=1)   # ✅ исправлено: было .replace(day=day+1)
         wait_sec = (next_run - now).total_seconds()
         logger.info(f"Ежедневная отправка через {wait_sec:.0f} сек ({next_run.strftime('%Y-%m-%d %H:%M UTC')})")
         await asyncio.sleep(wait_sec)
@@ -540,20 +521,20 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {str(e)}")
 
 
-# Регистрация команд
-for cmd in FUTURES.keys():
-    bot_app.add_handler(CommandHandler(cmd, handle_asset))
-bot_app.add_handler(CommandHandler("dist",  distribution))
-bot_app.add_handler(CommandHandler("all",   all_command))
-bot_app.add_handler(CommandHandler("start", start_cmd))
-
-
 # ────────────────────────────────────────────────
 # Webhook + lifespan
 # ────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await bot_app.initialize()
+
+    # ✅ исправлено: регистрация хендлеров внутри lifespan — один раз, не на уровне модуля
+    for cmd in FUTURES.keys():
+        bot_app.add_handler(CommandHandler(cmd, handle_asset))
+    bot_app.add_handler(CommandHandler("dist",  distribution))
+    bot_app.add_handler(CommandHandler("all",   all_command))
+    bot_app.add_handler(CommandHandler("start", start_cmd))
+
     try:
         await bot_app.bot.set_webhook(f"{URL}/webhook")
         logger.info(f"Webhook set: {URL}/webhook")
