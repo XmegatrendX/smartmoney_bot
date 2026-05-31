@@ -252,14 +252,14 @@ def make_chart(df, symbol):
     ax2.grid(alpha=0.3)
 
     try:
-        peak_idx = rsx.idxmax()
-        peak_val = float(rsx.loc[peak_idx])
+        last_rsx_date = rsx.index[-1]
+        last_rsx_val  = float(rsx.iloc[-1])
         ax2.annotate(
-            f"{peak_idx.strftime('%d.%m.%Y')}\nRSX: {peak_val:.1f}",
-            xy=(peak_idx, peak_val),
-            xytext=(10, -20), textcoords='offset points',
+            f"{last_rsx_date.strftime('%d.%m.%Y')}\nRSX: {last_rsx_val:.1f}",
+            xy=(last_rsx_date, last_rsx_val),
+            xytext=(-60, 15), textcoords='offset points',
             bbox=dict(boxstyle='round,pad=0.3', facecolor='lightblue', alpha=0.8),
-            fontsize=9,
+            fontsize=9, fontweight='bold',
         )
     except Exception:
         pass
