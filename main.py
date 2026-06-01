@@ -421,7 +421,7 @@ async def daily_sender():
         now      = datetime.now(timezone.utc)
         next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
         if now >= next_run:
-            next_run += timedelta(days=1)   # ✅ исправлено: было .replace(day=day+1)
+            next_run += timedelta(days=1)
         wait_sec = (next_run - now).total_seconds()
         logger.info(f"Ежедневная отправка через {wait_sec:.0f} сек ({next_run.strftime('%Y-%m-%d %H:%M UTC')})")
         await asyncio.sleep(wait_sec)
@@ -429,15 +429,30 @@ async def daily_sender():
         logger.info("Запуск ежедневной отправки графиков...")
         try:
             for cmd, ticker in FUTURES.items():
-                df = smart_money_flow(ticker)
+                df = None
+                for attempt in range(3):          # ← 3 попытки
+                    df = smart_money_flow(ticker)
+                    if df is not None:
+                        break
+                    logger.warning(f"{cmd.upper()}: попытка {attempt+1} вернула None, повтор через 10 сек...")
+                    await asyncio.sleep(10)
+
                 if df is None:
+                    logger.error(f"{cmd.upper()}: все попытки исчерпаны, пропускаем")
+                    await bot_app.bot.send_message(
+                        chat_id=CHAT_ID,
+                        text=f"⚠️ {cmd.upper()}: не удалось получить данные после 3 попыток"
+                    )
                     continue
+
                 buf = make_chart(df, cmd.upper())
                 await bot_app.bot.send_photo(
                     chat_id=CHAT_ID,
                     photo=buf,
                     caption=f"{cmd.upper()} — Volume Stress / Participation Index + RSX(9)"
                 )
+                logger.info(f"{cmd.upper()}: отправлен ✅")
+
             buf_dist = make_distribution_chart()
             if buf_dist:
                 await bot_app.bot.send_photo(
